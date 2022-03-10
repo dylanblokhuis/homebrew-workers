@@ -1,0 +1,22 @@
+[package]
+name = "homebrew-workers"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+axum = "0.4.8"
+axum-macros = "0.1.2"
+deno_console = "0.39.0"
+deno_core = "0.121.0"
+deno_fetch = "0.62.0"
+deno_net = "0.31.0"
+deno_runtime = "0.47.0"
+deno_tls = "0.26.0"
+deno_url = "0.39.0"
+deno_web = "0.70.0"
+deno_webidl = "0.39.0"
+serde = "1.0.136"
+tokio = { version = "1", features = ["full"] }
+v8 = "0.40.2"
