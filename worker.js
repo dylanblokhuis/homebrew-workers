@@ -5,9 +5,6 @@ async function onRequest(request) {
     }
   });
 
-  // const text = await Deno.readTextFile("./some-app/main.js");
-  // console.log(text);
-
   respondWith({
     headers: Object.fromEntries(response.headers),
     ok: response.ok,

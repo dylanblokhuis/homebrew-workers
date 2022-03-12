@@ -41,5 +41,6 @@ async fn handler(req: Request<Body>) -> Response<Body> {
 
 #[tokio::main(flavor = "current_thread")]
 async fn handle_request_in_v8(req: Request<Body>) -> JsResponse {
+    println!("{:?}", req);
     run(req).await
 }

@@ -1,4 +1,5 @@
 use axum::body::Body;
+use axum::http::header::HOST;
 use axum::http::Request;
 use deno_core::error::AnyError;
 use deno_core::located_script_name;
@@ -196,7 +197,7 @@ pub async fn run(request: Request<Body>) -> JsResponse {
     let permissions = Permissions::from_options(&permission_options);
     let mut js_runtime = init(permissions, options);
 
-    let path = Path::new("worker.js");
+    let path = Path::new("./some-app/main.js");
     let js_code = std::fs::read_to_string(path).unwrap();
 
     js_runtime.execute_script("user", &js_code).unwrap();
@@ -206,7 +207,13 @@ pub async fn run(request: Request<Body>) -> JsResponse {
         let request_obj = v8::Object::new(scope);
 
         let url_key = v8::String::new(scope, "url").unwrap();
-        let url_value = v8::String::new(scope, &request.uri().to_string()).unwrap();
+        let url = format!(
+            "http://{}{}",
+            request.headers().get(HOST).unwrap().to_str().unwrap(),
+            request.uri().path()
+        );
+        let url_value = v8::String::new(scope, &url).unwrap();
+
         request_obj.set(scope, url_key.into(), url_value.into());
 
         let method_key = v8::String::new(scope, "method").unwrap();
@@ -227,6 +234,7 @@ pub async fn run(request: Request<Body>) -> JsResponse {
         let global = context.global(scope);
         let name = v8::String::new(scope, "onRequest").unwrap();
         let func = global.get(scope, name.into()).unwrap();
+
         let cb = v8::Local::<v8::Function>::try_from(func).unwrap();
         let args = &[request_obj.into()];
         cb.call(scope, global.into(), args).unwrap();
