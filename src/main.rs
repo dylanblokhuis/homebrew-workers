@@ -2,7 +2,7 @@ use axum::body::Body;
 use axum::http::header::HeaderName;
 use axum::http::{HeaderValue, Request, Response};
 use axum::{routing::get, Router};
-use runtime::Runtime;
+use runtime::{run, JsResponse};
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::thread;
@@ -23,18 +23,9 @@ async fn main() {
 
 #[axum_macros::debug_handler]
 async fn handler(req: Request<Body>) -> Response<Body> {
-    println!("{:?}", req);
-    let yo = thread::spawn(move || handle_request_in_v8(req))
+    let js_response = thread::spawn(move || handle_request_in_v8(req))
         .join()
         .expect("Thread panicked");
-
-    yo
-}
-
-#[tokio::main]
-async fn handle_request_in_v8(req: Request<Body>) -> Response<Body> {
-    let mut runtime = Runtime::new();
-    let js_response = runtime.run(req).await;
 
     let mut response = Response::new(Body::try_from(js_response.body).unwrap());
     let headers = response.headers_mut();
@@ -46,4 +37,9 @@ async fn handle_request_in_v8(req: Request<Body>) -> Response<Body> {
     }
 
     response
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn handle_request_in_v8(req: Request<Body>) -> JsResponse {
+    run(req).await
 }
