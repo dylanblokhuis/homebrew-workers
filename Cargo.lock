@@ -1314,6 +1314,7 @@ dependencies = [
  "deno_url",
  "deno_web",
  "deno_webidl",
+ "rand",
  "serde",
  "tokio",
  "v8",
