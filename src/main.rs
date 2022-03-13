@@ -14,7 +14,6 @@ use std::sync::Arc;
 use std::thread;
 use tokio::sync::mpsc::{self, channel};
 use tokio::sync::oneshot::{self, Sender};
-use tokio::sync::Mutex;
 
 use crate::runtime::RunOptions;
 
@@ -27,29 +26,23 @@ struct AppState {
 
 #[tokio::main]
 async fn main() {
-    let senders: Arc<Mutex<Vec<RuntimeChannel>>> = Arc::new(Mutex::new(Vec::new()));
+    let mut senders: Vec<RuntimeChannel> = Vec::new();
 
     // spawn 5 v8 workers
     for _ in 0..5 {
         let (tx, rx) = channel::<(Request<Body>, Sender<Response<Body>>)>(1);
-        senders.lock().await.push(tx);
-        thread::spawn(|| {
-            spawn_js_runtime(rx);
-        });
+        senders.push(tx);
+        thread::spawn(|| spawn_js_runtime(rx));
     }
 
-    let lift_arc = Arc::try_unwrap(senders).unwrap();
-    let senders_without_mutex = lift_arc.into_inner();
-    let app_state = Arc::new(AppState {
-        senders: senders_without_mutex,
-    });
+    let app_state = Arc::new(AppState { senders });
 
     let app = Router::new()
         .route("/*key", get(handler))
         .layer(Extension(app_state));
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
-    println!("listening on {}", addr);
+    println!("Listening on {}", addr);
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await
