@@ -15,7 +15,6 @@ use deno_runtime::inspector_server::InspectorServer;
 use deno_runtime::js;
 use deno_runtime::ops;
 use deno_runtime::permissions::Permissions;
-use deno_runtime::permissions::PermissionsOptions;
 use deno_runtime::BootstrapOptions;
 use deno_tls::rustls::RootCertStore;
 use serde::Deserialize;
@@ -154,115 +153,15 @@ pub fn init(permissions: Permissions, mut options: RunOptions) -> deno_core::JsR
     js_runtime
 }
 
-pub async fn run(request: Request<Body>) -> JsResponse {
-    let options = RunOptions {
-        bootstrap: BootstrapOptions {
-            apply_source_maps: false,
-            args: vec![],
-            cpu_count: 1,
-            debug_flag: false,
-            enable_testing_features: false,
-            location: None,
-            no_color: false,
-            is_tty: false,
-            runtime_version: "x".to_string(),
-            ts_version: "x".to_string(),
-            unstable: false,
-        },
-        extensions: vec![],
-        unsafely_ignore_certificate_errors: None,
-        root_cert_store: None,
-        user_agent: "hello_runtime".to_string(),
-        seed: None,
-        js_error_create_fn: None,
-        maybe_inspector_server: None,
-        should_break_on_first_statement: false,
-        get_error_class_fn: Some(&get_error_class_name),
-        blob_store: BlobStore::default(),
-        shared_array_buffer_store: None,
-        compiled_wasm_module_store: None,
-    };
-
-    let allowed_path = Path::new("./some-app");
-    let permission_options = PermissionsOptions {
-        allow_env: None,
-        allow_ffi: None,
-        allow_hrtime: false,
-        allow_run: None,
-        allow_write: None,
-        prompt: false,
-        allow_net: Some(vec![]),
-        allow_read: Some(vec![allowed_path.to_path_buf()]),
-    };
-    let permissions = Permissions::from_options(&permission_options);
-    let mut js_runtime = init(permissions, options);
-
-    let path = Path::new("./some-app/main.js");
-    let js_code = std::fs::read_to_string(path).unwrap();
-
-    js_runtime.execute_script("user", &js_code).unwrap();
-
-    {
-        let scope = &mut js_runtime.handle_scope();
-        let request_obj = v8::Object::new(scope);
-
-        let url_key = v8::String::new(scope, "url").unwrap();
-        let url = format!(
-            "http://{}{}",
-            request.headers().get(HOST).unwrap().to_str().unwrap(),
-            request.uri().path()
-        );
-        let url_value = v8::String::new(scope, &url).unwrap();
-
-        request_obj.set(scope, url_key.into(), url_value.into());
-
-        let method_key = v8::String::new(scope, "method").unwrap();
-        let method_value = v8::String::new(scope, request.method().as_str()).unwrap();
-        request_obj.set(scope, method_key.into(), method_value.into());
-
-        let header_key = v8::String::new(scope, "headers").unwrap();
-        let header_object = v8::Object::new(scope);
-        for (key, value) in request.headers() {
-            let key = v8::String::new(scope, key.as_str()).unwrap();
-            let value = v8::String::new(scope, value.to_str().unwrap()).unwrap();
-
-            header_object.set(scope, key.into(), value.into());
-        }
-        request_obj.set(scope, header_key.into(), header_object.into());
-
-        let context = scope.get_current_context();
-        let global = context.global(scope);
-        let name = v8::String::new(scope, "onRequest").unwrap();
-        let func = global.get(scope, name.into()).unwrap();
-
-        let cb = v8::Local::<v8::Function>::try_from(func).unwrap();
-        let args = &[request_obj.into()];
-        cb.call(scope, global.into(), args).unwrap();
-    }
-
-    {
-        js_runtime.run_event_loop(false).await.unwrap();
-    }
-
-    let yo = js_runtime.global_context();
-    let scope = &mut js_runtime.handle_scope();
-    let global = yo.open(scope).global(scope);
-    let name = v8::String::new(scope, "requestResult").unwrap();
-    let response = global.get(scope, name.into()).unwrap();
-
-    let js_response: JsResponse = deno_core::serde_v8::from_v8(scope, response).unwrap();
-
-    js_response
-}
-
 pub async fn run_with_existing_runtime(
     js_runtime: &mut JsRuntime,
     request: Request<Body>,
 ) -> JsResponse {
-    let path = Path::new("./some-app/main.js");
-    let js_code = std::fs::read_to_string(path).unwrap();
-
-    js_runtime.execute_script("user", &js_code).unwrap();
+    {
+        let path = Path::new("./some-app/main.js");
+        let js_code = std::fs::read_to_string(path).unwrap();
+        js_runtime.execute_script("user", &js_code).unwrap();
+    }
 
     {
         let scope = &mut js_runtime.handle_scope();
@@ -313,6 +212,8 @@ pub async fn run_with_existing_runtime(
     let response = global.get(scope, name.into()).unwrap();
 
     let js_response: JsResponse = deno_core::serde_v8::from_v8(scope, response).unwrap();
+
+    global.delete(scope, name.into()).unwrap();
 
     js_response
 }

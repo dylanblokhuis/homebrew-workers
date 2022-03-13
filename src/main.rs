@@ -29,8 +29,9 @@ struct AppState {
 async fn main() {
     let senders: Arc<Mutex<Vec<RuntimeChannel>>> = Arc::new(Mutex::new(Vec::new()));
 
-    for _ in 0..10 {
-        let (tx, rx) = channel::<(Request<Body>, Sender<Response<Body>>)>(100);
+    // spawn 5 v8 workers
+    for _ in 0..5 {
+        let (tx, rx) = channel::<(Request<Body>, Sender<Response<Body>>)>(1);
         senders.lock().await.push(tx);
         thread::spawn(|| {
             get_js_runtime(rx);
@@ -57,7 +58,6 @@ async fn main() {
 
 #[axum_macros::debug_handler]
 async fn handler(Extension(state): Extension<Arc<AppState>>, req: Request<Body>) -> Response<Body> {
-    println!("FROM HANDLER: {}", req.uri());
     let (tx, rx) = oneshot::channel::<Response<Body>>();
 
     let random_item = state.senders.choose(&mut rand::thread_rng()).unwrap();
@@ -111,10 +111,14 @@ async fn get_js_runtime(mut rx: mpsc::Receiver<(Request<Body>, Sender<Response<B
     let permissions = Permissions::from_options(&permission_options);
     let mut js_runtime = runtime::init(permissions, options);
 
-    println!("Runtime created!");
+    println!("{:?}: Runtime created!", thread::current().id());
 
     while let Some((request, req_tx)) = rx.recv().await {
-        println!("FROM JS_RUNTIME: {}", request.uri());
+        println!(
+            "{:?}: js_runtime handling: {}",
+            thread::current().id(),
+            request.uri()
+        );
         let js_response = runtime::run_with_existing_runtime(&mut js_runtime, request).await;
         let mut response = Response::new(Body::try_from(js_response.body).unwrap());
         let headers = response.headers_mut();
