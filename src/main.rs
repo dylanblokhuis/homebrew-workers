@@ -34,7 +34,7 @@ async fn main() {
         let (tx, rx) = channel::<(Request<Body>, Sender<Response<Body>>)>(1);
         senders.lock().await.push(tx);
         thread::spawn(|| {
-            get_js_runtime(rx);
+            spawn_js_runtime(rx);
         });
     }
 
@@ -68,7 +68,7 @@ async fn handler(Extension(state): Extension<Arc<AppState>>, req: Request<Body>)
 }
 
 #[tokio::main(flavor = "current_thread")]
-async fn get_js_runtime(mut rx: mpsc::Receiver<(Request<Body>, Sender<Response<Body>>)>) {
+async fn spawn_js_runtime(mut rx: mpsc::Receiver<(Request<Body>, Sender<Response<Body>>)>) {
     let options = RunOptions {
         bootstrap: BootstrapOptions {
             apply_source_maps: false,
