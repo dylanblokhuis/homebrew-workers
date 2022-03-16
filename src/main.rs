@@ -1,41 +1,66 @@
+use app::App;
 use axum::body::Body;
 use axum::extract::Extension;
-use axum::http::header::HeaderName;
-use axum::http::{HeaderValue, Request, Response};
+use axum::http::{Request, Response, StatusCode};
 use axum::{routing::get, Router};
-use deno_runtime::permissions::{Permissions, PermissionsOptions};
-use deno_runtime::BootstrapOptions;
-use deno_web::BlobStore;
-use rand::prelude::SliceRandom;
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::thread;
-use tokio::sync::mpsc::{self, channel};
-use tokio::sync::oneshot::{self, Sender};
+use tokio::sync::mpsc::{self};
+use tokio::sync::oneshot::{self};
 
-use crate::runtime::RunOptions;
-
+mod app;
 mod runtime;
 
-type RuntimeChannel = mpsc::Sender<(Request<Body>, Sender<Response<Body>>)>;
+pub type V8HandlerResponse = (StatusCode, Response<Body>);
 struct AppState {
-    senders: Vec<RuntimeChannel>,
+    tx: mpsc::Sender<(oneshot::Sender<V8HandlerResponse>, Request<Body>)>,
 }
 
 #[tokio::main]
 async fn main() {
-    let mut senders: Vec<RuntimeChannel> = Vec::new();
+    // create new runtime channel
+    let (tx, mut rx) = mpsc::channel::<(oneshot::Sender<V8HandlerResponse>, Request<Body>)>(1);
 
-    // spawn 5 v8 workers
-    for _ in 0..5 {
-        let (tx, rx) = channel::<(Request<Body>, Sender<Response<Body>>)>(1);
-        senders.push(tx);
-        thread::spawn(|| spawn_js_runtime(rx));
-    }
+    let app = App::new(
+        "some-app".to_string(),
+        PathBuf::from_str("./some-app").unwrap(),
+    );
+    let app2 = App::new(
+        "some-app2".to_string(),
+        PathBuf::from_str("./some-app2").unwrap(),
+    );
+    let apps = vec![app, app2];
 
-    let app_state = Arc::new(AppState { senders });
+    // signalling here to get the runtime
+    tokio::spawn(async move {
+        while let Some((oneshot_tx, req)) = rx.recv().await {
+            let header = req.headers().get("x-app");
+            if let Some(header_value) = header {
+                let app_name = header_value.to_str().unwrap();
+
+                let app = apps.iter().find(|it| it.name == app_name).unwrap();
+
+                println!("{} selected", app.name);
+                let runtime_channel = app.get_runtime().await;
+                runtime_channel.send((req, oneshot_tx)).unwrap();
+            } else {
+                // let request = Response::new(Body::empty());
+                // oneshot_tx.send((StatusCode::BAD_REQUEST, request)).unwrap();
+                println!("{} selected", "some-app");
+                let app = apps.iter().find(|it| it.name == "some-app").unwrap();
+                let mut runtime_channel = app.get_runtime().await;
+                if runtime_channel.is_closed() {
+                    runtime_channel = app.get_runtime().await;
+                }
+
+                runtime_channel.send((req, oneshot_tx)).unwrap();
+            }
+        }
+    });
+
+    let app_state = Arc::new(AppState { tx });
 
     let app = Router::new()
         .route("/*key", get(handler))
@@ -50,78 +75,15 @@ async fn main() {
 }
 
 #[axum_macros::debug_handler]
-async fn handler(Extension(state): Extension<Arc<AppState>>, req: Request<Body>) -> Response<Body> {
-    let (tx, rx) = oneshot::channel::<Response<Body>>();
-
-    let random_item = state.senders.choose(&mut rand::thread_rng()).unwrap();
-    random_item.send((req, tx)).await.unwrap();
-
-    let response = rx.await.unwrap();
-    response
-}
-
-#[tokio::main(flavor = "current_thread")]
-async fn spawn_js_runtime(mut rx: mpsc::Receiver<(Request<Body>, Sender<Response<Body>>)>) {
-    let options = RunOptions {
-        bootstrap: BootstrapOptions {
-            apply_source_maps: false,
-            args: vec![],
-            cpu_count: 1,
-            debug_flag: false,
-            enable_testing_features: false,
-            location: None,
-            no_color: false,
-            is_tty: false,
-            runtime_version: "x".to_string(),
-            ts_version: "x".to_string(),
-            unstable: false,
-        },
-        extensions: vec![],
-        unsafely_ignore_certificate_errors: None,
-        root_cert_store: None,
-        user_agent: "hello_runtime".to_string(),
-        seed: None,
-        js_error_create_fn: None,
-        maybe_inspector_server: None,
-        should_break_on_first_statement: false,
-        get_error_class_fn: Some(&runtime::get_error_class_name),
-        blob_store: BlobStore::default(),
-        shared_array_buffer_store: None,
-        compiled_wasm_module_store: None,
-    };
-
-    let allowed_path = Path::new("./some-app");
-    let permission_options = PermissionsOptions {
-        allow_env: None,
-        allow_ffi: None,
-        allow_hrtime: false,
-        allow_run: None,
-        allow_write: None,
-        prompt: false,
-        allow_net: Some(vec![]),
-        allow_read: Some(vec![allowed_path.to_path_buf()]),
-    };
-    let permissions = Permissions::from_options(&permission_options);
-    let mut js_runtime = runtime::init(permissions, options);
-
-    println!("{:?}: Runtime created!", thread::current().id());
-
-    while let Some((request, req_tx)) = rx.recv().await {
-        println!(
-            "{:?}: js_runtime handling: {}",
-            thread::current().id(),
-            request.uri()
-        );
-        let js_response = runtime::run_with_existing_runtime(&mut js_runtime, request).await;
-        let mut response = Response::new(Body::try_from(js_response.body).unwrap());
-        let headers = response.headers_mut();
-        for (key, value) in js_response.headers {
-            headers.insert(
-                HeaderName::from_str(key.as_str()).unwrap(),
-                HeaderValue::from_str(value.as_str()).unwrap(),
-            );
-        }
-
-        req_tx.send(response).unwrap();
-    }
+async fn handler(
+    Extension(state): Extension<Arc<AppState>>,
+    req: Request<Body>,
+) -> V8HandlerResponse {
+    let (tx, rx) = oneshot::channel::<V8HandlerResponse>();
+    state
+        .tx
+        .send((tx, req))
+        .await
+        .expect("state.tx.send failed");
+    rx.await.expect("oneshot_tx failed")
 }
