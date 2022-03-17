@@ -1,4 +1,3 @@
-#![feature(drain_filter)]
 use app::App;
 use axum::body::Body;
 use axum::extract::Extension;

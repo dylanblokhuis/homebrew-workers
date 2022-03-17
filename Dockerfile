@@ -1,4 +1,4 @@
-FROM rust:1.56.0 AS chef 
+FROM rust:latest AS chef 
 # We only pay the installation cost once, 
 # it will be cached from the second build onwards
 RUN cargo install cargo-chef 
@@ -17,7 +17,7 @@ COPY . .
 RUN cargo build --release --bin homebrew-workers
 
 # We do not need the Rust toolchain to run the binary!
-FROM rust:1.56.0 as runtime
+FROM rust:latest as runtime
 WORKDIR app
 COPY . .
 COPY --from=builder /app/target/release/homebrew-workers /usr/local/bin

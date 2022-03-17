@@ -94,7 +94,11 @@ impl App {
             tx.closed().await;
             println!("{} Closed", index);
             let mut runtimes = runtimes2.lock().unwrap();
-            runtimes.drain_filter(|x| x.id == index);
+            for (key, runtime) in runtimes.clone().iter().enumerate() {
+                if runtime.id == index {
+                    runtimes.remove(key);
+                }
+            }
         });
     }
 }
