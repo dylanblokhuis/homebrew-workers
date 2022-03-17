@@ -13,11 +13,11 @@ use rand::{prelude::SliceRandom, thread_rng, Rng};
 use std::{
     path::PathBuf,
     str::FromStr,
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, Mutex},
     thread::{self},
     time::Instant,
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, RwLock};
 
 use crate::{
     runtime::{self, RunOptions},
@@ -135,7 +135,7 @@ fn spawn_v8_isolate(permissions: Permissions) -> JsRuntime {
     runtime::init(permissions, options)
 }
 
-#[tokio::main(worker_threads = 2)]
+#[tokio::main]
 async fn handle_request(runtime: &mut JsRuntime, rx: &mut mpsc::Receiver<RuntimeChannelPayload>) {
     let last_request = Arc::new(RwLock::new(Instant::now()));
 
@@ -144,12 +144,12 @@ async fn handle_request(runtime: &mut JsRuntime, rx: &mut mpsc::Receiver<Runtime
 
         let handle = tokio::spawn(async move {
             loop {
-                let yo = last_request2.read().unwrap();
-                if yo.elapsed().as_secs() > 5 {
+                if last_request2.read().await.elapsed().as_secs() > 5 {
                     break;
                 }
+
                 // We sleep here due to read locks being slow, maybe use a mpsc channel here instead?
-                thread::sleep(time::Duration::from_secs(1));
+                tokio::time::sleep(time::Duration::from_secs(1)).await;
             }
         });
 
@@ -167,7 +167,8 @@ async fn handle_request(runtime: &mut JsRuntime, rx: &mut mpsc::Receiver<Runtime
 
                 oneshot_tx.send((StatusCode::OK, response)).unwrap();
 
-                let mut last_request_lock = last_request.write().unwrap();
+
+                let mut last_request_lock = last_request.write().await;
                 *last_request_lock = Instant::now();
             }
             _ = handle => {
