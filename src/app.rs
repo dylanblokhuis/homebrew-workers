@@ -116,7 +116,6 @@ fn spawn_v8_isolate(permissions: Permissions) -> JsRuntime {
         },
         extensions: vec![],
         unsafely_ignore_certificate_errors: None,
-        root_cert_store: None,
         user_agent: "hello_runtime".to_string(),
         seed: None,
         js_error_create_fn: None,

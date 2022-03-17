@@ -16,7 +16,6 @@ use deno_runtime::js;
 use deno_runtime::ops;
 use deno_runtime::permissions::Permissions;
 use deno_runtime::BootstrapOptions;
-use deno_tls::rustls::RootCertStore;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -28,7 +27,6 @@ pub struct RunOptions {
     pub bootstrap: BootstrapOptions,
     pub extensions: Vec<Extension>,
     pub unsafely_ignore_certificate_errors: Option<Vec<String>>,
-    pub root_cert_store: Option<RootCertStore>,
     pub user_agent: String,
     pub seed: Option<u64>,
     pub js_error_create_fn: Option<Rc<JsErrorCreateFn>>,
@@ -79,7 +77,6 @@ pub fn init(permissions: Permissions, mut options: RunOptions) -> deno_core::JsR
         ),
         deno_fetch::init::<Permissions>(deno_fetch::Options {
             user_agent: options.user_agent.clone(),
-            root_cert_store: options.root_cert_store.clone(),
             unsafely_ignore_certificate_errors: options.unsafely_ignore_certificate_errors.clone(),
             file_fetch_handler: Rc::new(deno_fetch::FsFetchHandler),
             ..Default::default()
