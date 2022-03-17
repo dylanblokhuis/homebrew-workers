@@ -2,6 +2,7 @@ use axum::{
     body::Body,
     http::{header::HeaderName, HeaderValue, Request, Response, StatusCode},
 };
+use core::time;
 use deno_core::JsRuntime;
 use deno_runtime::{
     permissions::{Permissions, PermissionsOptions},
@@ -147,6 +148,8 @@ async fn handle_request(runtime: &mut JsRuntime, rx: &mut mpsc::Receiver<Runtime
                 if yo.elapsed().as_secs() > 5 {
                     break;
                 }
+                // We sleep here due to read locks being slow, maybe use a mpsc channel here instead?
+                thread::sleep(time::Duration::from_secs(1));
             }
         });
 
