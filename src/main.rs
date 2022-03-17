@@ -1,3 +1,4 @@
+#![feature(drain_filter)]
 use app::App;
 use axum::body::Body;
 use axum::extract::Extension;
@@ -27,35 +28,22 @@ async fn main() {
         "some-app".to_string(),
         PathBuf::from_str("./some-app").unwrap(),
     );
-    let app2 = App::new(
-        "some-app2".to_string(),
-        PathBuf::from_str("./some-app2").unwrap(),
-    );
-    let apps = vec![app, app2];
+    let apps = vec![app];
 
     // signalling here to get the runtime
     tokio::spawn(async move {
         while let Some((oneshot_tx, req)) = rx.recv().await {
             let header = req.headers().get("x-app");
             if let Some(header_value) = header {
-                let app_name = header_value.to_str().unwrap();
-
-                let app = apps.iter().find(|it| it.name == app_name).unwrap();
-
-                println!("{} selected", app.name);
+                let app = apps
+                    .iter()
+                    .find(|it| it.name == header_value.to_str().unwrap())
+                    .unwrap();
                 let runtime_channel = app.get_runtime().await;
-                runtime_channel.send((req, oneshot_tx)).unwrap();
+                runtime_channel.send((req, oneshot_tx)).await.unwrap();
             } else {
-                // let request = Response::new(Body::empty());
-                // oneshot_tx.send((StatusCode::BAD_REQUEST, request)).unwrap();
-                println!("{} selected", "some-app");
-                let app = apps.iter().find(|it| it.name == "some-app").unwrap();
-                let mut runtime_channel = app.get_runtime().await;
-                if runtime_channel.is_closed() {
-                    runtime_channel = app.get_runtime().await;
-                }
-
-                runtime_channel.send((req, oneshot_tx)).unwrap();
+                let request = Response::new(Body::empty());
+                oneshot_tx.send((StatusCode::BAD_REQUEST, request)).unwrap();
             }
         }
     });

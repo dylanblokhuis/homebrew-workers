@@ -8,13 +8,13 @@ use deno_runtime::{
     BootstrapOptions,
 };
 use deno_web::BlobStore;
-use rand::{prelude::SliceRandom, thread_rng};
+use rand::{prelude::SliceRandom, thread_rng, Rng};
 use std::{
     path::PathBuf,
     str::FromStr,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
     thread::{self},
-    time::SystemTime,
+    time::Instant,
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -27,7 +27,8 @@ type RuntimeChannelPayload = (Request<Body>, oneshot::Sender<V8HandlerResponse>)
 
 #[derive(Clone, Debug)]
 pub struct V8Runtime {
-    pub v8_sender: mpsc::UnboundedSender<RuntimeChannelPayload>,
+    pub id: i32,
+    pub v8_sender: mpsc::Sender<RuntimeChannelPayload>,
 }
 pub struct App {
     pub name: String,
@@ -44,59 +45,57 @@ impl App {
         }
     }
 
-    pub async fn get_runtime(&self) -> mpsc::UnboundedSender<RuntimeChannelPayload> {
-        let mut senders = vec![];
-
-        {
-            let mut runtimes = self.runtimes.lock().unwrap();
-            println!("before: {}", runtimes.len());
-
-            if runtimes.is_empty() {
-                let permission_options = PermissionsOptions {
-                    allow_env: None,
-                    allow_ffi: None,
-                    allow_hrtime: false,
-                    allow_run: None,
-                    allow_write: None,
-                    prompt: false,
-                    allow_net: Some(vec![]),
-                    allow_read: Some(vec![self.path.to_path_buf()]),
-                };
-                let permissions = Permissions::from_options(&permission_options);
-
-                let (tx, mut rx) = mpsc::unbounded_channel::<RuntimeChannelPayload>();
-                thread::spawn(move || {
-                    let mut runtime = spawn_v8_isolate(permissions);
-                    handle_request(&mut runtime, &mut rx);
-                    println!("Closing!");
-                });
-
-                println!("spawned a new runtime!");
-                let tx2 = tx.clone();
-                senders.push(V8Runtime { v8_sender: tx2 });
-                *runtimes = senders;
-
-                let runtimes2 = self.runtimes.clone();
-                tokio::spawn(async move {
-                    println!("Waiting for sender to close");
-                    tx.closed().await;
-                    println!("Sender closed");
-                    let mut runtimes = runtimes2.lock().unwrap();
-                    runtimes.drain(..);
-
-                    println!("{:?}", runtimes);
-                });
-            }
+    pub async fn get_runtime(&self) -> mpsc::Sender<RuntimeChannelPayload> {
+        if self.runtimes.lock().unwrap().len() == 0 {
+            self.new_worker().await;
         }
 
         let runtimes = self.runtimes.lock().unwrap();
-        println!("after: {}", runtimes.len());
-
+        println!("We have {} runtimes, picking one..", runtimes.len());
         let random_worker = runtimes
             .choose(&mut thread_rng())
             .expect("Could not found an open worker");
 
         random_worker.v8_sender.clone()
+    }
+
+    async fn new_worker(&self) {
+        let permission_options = PermissionsOptions {
+            allow_env: None,
+            allow_ffi: None,
+            allow_hrtime: false,
+            allow_run: None,
+            allow_write: None,
+            prompt: false,
+            allow_net: Some(vec![]),
+            allow_read: Some(vec![self.path.to_path_buf()]),
+        };
+        let permissions = Permissions::from_options(&permission_options);
+        let (tx, mut rx) = mpsc::channel::<RuntimeChannelPayload>(1);
+
+        thread::spawn(move || {
+            let mut runtime = spawn_v8_isolate(permissions);
+            handle_request(&mut runtime, &mut rx);
+            println!("Closing!");
+        });
+
+        let mut runtimes = self.runtimes.lock().unwrap();
+
+        let tx2 = tx.clone();
+        let index = rand::thread_rng().gen::<i32>();
+        runtimes.push(V8Runtime {
+            id: index,
+            v8_sender: tx2,
+        });
+
+        let runtimes2 = self.runtimes.clone();
+        tokio::spawn(async move {
+            println!("Waiting for sender to close");
+            tx.closed().await;
+            println!("{} Closed", index);
+            let mut runtimes = runtimes2.lock().unwrap();
+            runtimes.drain_filter(|x| x.id == index);
+        });
     }
 }
 
@@ -132,28 +131,46 @@ fn spawn_v8_isolate(permissions: Permissions) -> JsRuntime {
     runtime::init(permissions, options)
 }
 
-#[tokio::main(flavor = "current_thread")]
-async fn handle_request(
-    runtime: &mut JsRuntime,
-    rx: &mut mpsc::UnboundedReceiver<RuntimeChannelPayload>,
-) {
-    let mut last_request = 0;
-    while let Some((request, oneshot_tx)) = rx.recv().await {
-        let js_response = runtime::run_with_existing_runtime(runtime, request).await;
-        let mut response = Response::new(Body::try_from(js_response.body).unwrap());
-        let headers = response.headers_mut();
-        for (key, value) in js_response.headers {
-            headers.insert(
-                HeaderName::from_str(key.as_str()).unwrap(),
-                HeaderValue::from_str(value.as_str()).unwrap(),
-            );
-        }
+#[tokio::main(worker_threads = 2)]
+async fn handle_request(runtime: &mut JsRuntime, rx: &mut mpsc::Receiver<RuntimeChannelPayload>) {
+    let last_request = Arc::new(RwLock::new(Instant::now()));
 
-        oneshot_tx.send((StatusCode::OK, response)).unwrap();
-        last_request += 1;
+    loop {
+        let last_request2 = Arc::clone(&last_request);
 
-        if last_request > 50 {
-            rx.close();
+        let handle = tokio::spawn(async move {
+            loop {
+                let yo = last_request2.read().unwrap();
+                if yo.elapsed().as_secs() > 5 {
+                    break;
+                }
+            }
+        });
+
+        tokio::select! {
+            Some((request, oneshot_tx)) = rx.recv() => {
+                let js_response = runtime::run_with_existing_runtime(runtime, request).await;
+                let mut response = Response::new(Body::try_from(js_response.body).unwrap());
+                let headers = response.headers_mut();
+                for (key, value) in js_response.headers {
+                    headers.insert(
+                        HeaderName::from_str(key.as_str()).unwrap(),
+                        HeaderValue::from_str(value.as_str()).unwrap(),
+                    );
+                }
+
+                oneshot_tx.send((StatusCode::OK, response)).unwrap();
+
+                let mut last_request_lock = last_request.write().unwrap();
+                *last_request_lock = Instant::now();
+            }
+            _ = handle => {
+                println!("5 seconds passed, so we're killing this runtime.");
+                break;
+            }
         }
     }
+
+    // something.await.unwrap();
+    println!("Closing handle_request thread");
 }
