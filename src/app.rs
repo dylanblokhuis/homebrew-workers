@@ -166,8 +166,6 @@ async fn handle_request(runtime: &mut JsRuntime, rx: &mut mpsc::Receiver<Runtime
                 }
 
                 oneshot_tx.send((StatusCode::OK, response)).unwrap();
-
-
                 let mut last_request_lock = last_request.write().await;
                 *last_request_lock = Instant::now();
             }
@@ -178,6 +176,5 @@ async fn handle_request(runtime: &mut JsRuntime, rx: &mut mpsc::Receiver<Runtime
         }
     }
 
-    // something.await.unwrap();
     println!("Closing handle_request thread");
 }
