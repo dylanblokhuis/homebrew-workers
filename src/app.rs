@@ -15,9 +15,9 @@ use std::{
     str::FromStr,
     sync::{Arc, Mutex},
     thread::{self},
-    time::Instant,
+    time::{Duration, Instant},
 };
-use tokio::sync::{mpsc, oneshot, RwLock};
+use tokio::sync::{mpsc, oneshot};
 
 use crate::{
     runtime::{self, RunOptions},
@@ -55,7 +55,7 @@ impl App {
         println!("We have {} runtimes, picking one..", runtimes.len());
         let random_worker = runtimes
             .choose(&mut thread_rng())
-            .expect("Could not found an open worker");
+            .expect("Could not find an open worker");
 
         random_worker.v8_sender.clone()
     }
@@ -135,24 +135,9 @@ fn spawn_v8_isolate(permissions: Permissions) -> JsRuntime {
     runtime::init(permissions, options)
 }
 
-#[tokio::main]
+#[tokio::main(worker_threads = 2)]
 async fn handle_request(runtime: &mut JsRuntime, rx: &mut mpsc::Receiver<RuntimeChannelPayload>) {
-    let last_request = Arc::new(RwLock::new(Instant::now()));
-
     loop {
-        let last_request2 = Arc::clone(&last_request);
-
-        let handle = tokio::spawn(async move {
-            loop {
-                if last_request2.read().await.elapsed().as_secs() > 5 {
-                    break;
-                }
-
-                // We sleep here due to read locks being slow, maybe use a mpsc channel here instead?
-                tokio::time::sleep(time::Duration::from_secs(1)).await;
-            }
-        });
-
         tokio::select! {
             Some((request, oneshot_tx)) = rx.recv() => {
                 let js_response = runtime::run_with_existing_runtime(runtime, request).await;
@@ -166,11 +151,9 @@ async fn handle_request(runtime: &mut JsRuntime, rx: &mut mpsc::Receiver<Runtime
                 }
 
                 oneshot_tx.send((StatusCode::OK, response)).unwrap();
-                let mut last_request_lock = last_request.write().await;
-                *last_request_lock = Instant::now();
             }
-            _ = handle => {
-                println!("5 seconds passed, so we're killing this runtime.");
+            _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                println!("5 seconds passed without a request, so we're killing this runtime.");
                 break;
             }
         }
