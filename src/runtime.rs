@@ -151,13 +151,14 @@ pub fn init(permissions: Permissions, mut options: RunOptions) -> deno_core::JsR
 }
 
 pub async fn run_with_existing_runtime(
+    name: String,
     js_runtime: &mut JsRuntime,
     request: Request<Body>,
 ) -> JsResponse {
     {
         let path = Path::new("./some-app/main.js");
         let js_code = std::fs::read_to_string(path).unwrap();
-        js_runtime.execute_script("user", &js_code).unwrap();
+        js_runtime.execute_script(name.as_str(), &js_code).unwrap();
     }
 
     {
@@ -202,15 +203,13 @@ pub async fn run_with_existing_runtime(
         js_runtime.run_event_loop(false).await.unwrap();
     }
 
-    let yo = js_runtime.global_context();
+    let context = js_runtime.global_context();
     let scope = &mut js_runtime.handle_scope();
-    let global = yo.open(scope).global(scope);
+    let global = context.open(scope).global(scope);
     let name = v8::String::new(scope, "requestResult").unwrap();
     let response = global.get(scope, name.into()).unwrap();
-
-    let js_response: JsResponse = deno_core::serde_v8::from_v8(scope, response).unwrap();
-
     global.delete(scope, name.into()).unwrap();
 
+    let js_response: JsResponse = deno_core::serde_v8::from_v8(scope, response).unwrap();
     js_response
 }

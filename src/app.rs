@@ -64,6 +64,7 @@ impl App {
         let permissions = Permissions::from_options(&permission_options);
         let (tx, mut rx) = mpsc::channel::<RuntimeChannelPayload>(1);
 
+        let name = self.name.clone();
         thread::spawn(move || {
             let mut runtime = spawn_v8_isolate(permissions);
 
@@ -73,7 +74,7 @@ impl App {
                 .build()
                 .unwrap()
                 .block_on(async {
-                    handle_request(&mut runtime, &mut rx).await;
+                    handle_request(name, &mut runtime, &mut rx).await;
                 });
 
             println!("Closing!");
@@ -125,11 +126,15 @@ fn spawn_v8_isolate(permissions: Permissions) -> JsRuntime {
     runtime::init(permissions, options)
 }
 
-async fn handle_request(runtime: &mut JsRuntime, rx: &mut mpsc::Receiver<RuntimeChannelPayload>) {
+async fn handle_request(
+    name: String,
+    runtime: &mut JsRuntime,
+    rx: &mut mpsc::Receiver<RuntimeChannelPayload>,
+) {
     loop {
         tokio::select! {
             Some((request, oneshot_tx)) = rx.recv() => {
-                let js_response = runtime::run_with_existing_runtime(runtime, request).await;
+                let js_response = runtime::run_with_existing_runtime(name.clone(), runtime, request).await;
                 let mut response = Response::new(Body::try_from(js_response.body).unwrap());
                 let headers = response.headers_mut();
                 for (key, value) in js_response.headers {
