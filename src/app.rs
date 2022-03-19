@@ -2,20 +2,18 @@ use axum::{
     body::Body,
     http::{header::HeaderName, HeaderValue, Request, Response, StatusCode},
 };
-use core::time;
 use deno_core::JsRuntime;
 use deno_runtime::{
     permissions::{Permissions, PermissionsOptions},
     BootstrapOptions,
 };
 use deno_web::BlobStore;
-use rand::{prelude::SliceRandom, thread_rng, Rng};
 use std::{
     path::PathBuf,
     str::FromStr,
-    sync::{Arc, Mutex},
+    sync::{Arc, RwLock},
     thread::{self},
-    time::{Duration, Instant},
+    time::Duration,
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -26,15 +24,10 @@ use crate::{
 
 type RuntimeChannelPayload = (Request<Body>, oneshot::Sender<V8HandlerResponse>);
 
-#[derive(Clone, Debug)]
-pub struct V8Runtime {
-    pub id: i32,
-    pub v8_sender: mpsc::Sender<RuntimeChannelPayload>,
-}
 pub struct App {
     pub name: String,
     pub path: PathBuf,
-    pub runtimes: Arc<Mutex<Vec<V8Runtime>>>,
+    pub runtime: Arc<RwLock<Option<mpsc::Sender<RuntimeChannelPayload>>>>,
 }
 
 impl App {
@@ -42,25 +35,22 @@ impl App {
         Self {
             name,
             path,
-            runtimes: Arc::new(Mutex::new(Vec::new())),
+            runtime: Arc::new(RwLock::new(None)),
         }
     }
 
     pub async fn get_runtime(&self) -> mpsc::Sender<RuntimeChannelPayload> {
-        if self.runtimes.lock().unwrap().len() == 0 {
+        if self.runtime.read().unwrap().is_none() {
             self.new_worker().await;
         }
 
-        let runtimes = self.runtimes.lock().unwrap();
-        println!("We have {} runtimes, picking one..", runtimes.len());
-        let random_worker = runtimes
-            .choose(&mut thread_rng())
-            .expect("Could not find an open worker");
-
-        random_worker.v8_sender.clone()
+        let item = self.runtime.read().unwrap();
+        let item = item.as_ref();
+        item.unwrap().clone()
     }
 
     async fn new_worker(&self) {
+        println!("New worker spawned");
         let permission_options = PermissionsOptions {
             allow_env: None,
             allow_ffi: None,
@@ -76,30 +66,30 @@ impl App {
 
         thread::spawn(move || {
             let mut runtime = spawn_v8_isolate(permissions);
-            handle_request(&mut runtime, &mut rx);
+
+            tokio::runtime::Builder::new_multi_thread()
+                .thread_name("runtime-pool")
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async {
+                    handle_request(&mut runtime, &mut rx).await;
+                });
+
             println!("Closing!");
         });
 
-        let mut runtimes = self.runtimes.lock().unwrap();
+        {
+            let tx2 = tx.clone();
+            *self.runtime.write().unwrap() = Some(tx2);
+        }
 
-        let tx2 = tx.clone();
-        let index = rand::thread_rng().gen::<i32>();
-        runtimes.push(V8Runtime {
-            id: index,
-            v8_sender: tx2,
-        });
-
-        let runtimes2 = self.runtimes.clone();
+        let runtime2 = self.runtime.clone();
         tokio::spawn(async move {
-            println!("Waiting for sender to close");
             tx.closed().await;
-            println!("{} Closed", index);
-            let mut runtimes = runtimes2.lock().unwrap();
-            for (key, runtime) in runtimes.clone().iter().enumerate() {
-                if runtime.id == index {
-                    runtimes.remove(key);
-                }
-            }
+            println!("Closed");
+            let mut item = runtime2.write().unwrap();
+            *item = None;
         });
     }
 }
@@ -109,7 +99,7 @@ fn spawn_v8_isolate(permissions: Permissions) -> JsRuntime {
         bootstrap: BootstrapOptions {
             apply_source_maps: false,
             args: vec![],
-            cpu_count: 1,
+            cpu_count: std::thread::available_parallelism().unwrap().into(),
             debug_flag: false,
             enable_testing_features: false,
             location: None,
@@ -135,7 +125,6 @@ fn spawn_v8_isolate(permissions: Permissions) -> JsRuntime {
     runtime::init(permissions, options)
 }
 
-#[tokio::main(worker_threads = 2)]
 async fn handle_request(runtime: &mut JsRuntime, rx: &mut mpsc::Receiver<RuntimeChannelPayload>) {
     loop {
         tokio::select! {

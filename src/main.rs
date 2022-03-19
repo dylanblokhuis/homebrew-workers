@@ -3,6 +3,7 @@ use axum::body::Body;
 use axum::extract::Extension;
 use axum::http::{Request, Response, StatusCode};
 use axum::{routing::get, Router};
+use rand::prelude::SliceRandom;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -41,8 +42,14 @@ async fn main() {
                 let runtime_channel = app.get_runtime().await;
                 runtime_channel.send((req, oneshot_tx)).await.unwrap();
             } else {
-                let request = Response::new(Body::empty());
-                oneshot_tx.send((StatusCode::BAD_REQUEST, request)).unwrap();
+                let app = apps.choose(&mut rand::thread_rng());
+                if let Some(app) = app {
+                    let runtime_channel = app.get_runtime().await;
+                    runtime_channel.send((req, oneshot_tx)).await.unwrap();
+                } else {
+                    let request = Response::new(Body::empty());
+                    oneshot_tx.send((StatusCode::BAD_REQUEST, request)).unwrap();
+                }
             }
         }
     });
