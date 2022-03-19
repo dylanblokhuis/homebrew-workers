@@ -152,6 +152,4 @@ async fn handle_request(
             }
         }
     }
-
-    println!("Closing handle_request thread");
 }
