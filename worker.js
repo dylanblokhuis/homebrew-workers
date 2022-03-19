@@ -1,11 +1,11 @@
-async function onRequest(request) {
+async function onRequest(event) {
   const response = new Response("Test", {
     headers: {
       "X-Proto": "Test"
     }
   });
 
-  respondWith({
+  event.respondWith({
     headers: Object.fromEntries(response.headers),
     ok: response.ok,
     redirected: response.redirected,

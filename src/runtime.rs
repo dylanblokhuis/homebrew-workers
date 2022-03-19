@@ -163,6 +163,7 @@ pub async fn run_with_existing_runtime(
 
     {
         let scope = &mut js_runtime.handle_scope();
+        let event_obj = v8::Object::new(scope);
         let request_obj = v8::Object::new(scope);
 
         let url_key = v8::String::new(scope, "url").unwrap();
@@ -189,13 +190,21 @@ pub async fn run_with_existing_runtime(
         }
         request_obj.set(scope, header_key.into(), header_object.into());
 
+        let event_request_key = v8::String::new(scope, "request").unwrap();
+        event_obj.set(scope, event_request_key.into(), request_obj.into());
+        let event_respond_key = v8::String::new(scope, "respondWith").unwrap();
+
         let context = scope.get_current_context();
         let global = context.global(scope);
+
+        let respond_with_func = global.get(scope, event_respond_key.into()).unwrap();
+        event_obj.set(scope, event_respond_key.into(), respond_with_func);
+
         let name = v8::String::new(scope, "onRequest").unwrap();
         let func = global.get(scope, name.into()).unwrap();
 
         let cb = v8::Local::<v8::Function>::try_from(func).unwrap();
-        let args = &[request_obj.into()];
+        let args = &[event_obj.into()];
         cb.call(scope, global.into(), args).unwrap();
     }
 
