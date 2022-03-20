@@ -47,7 +47,7 @@ impl App {
             allow_run: None,
             allow_write: None,
             prompt: false,
-            allow_net: Some(vec![]),
+            allow_net: None,
             allow_read: Some(vec![self.path.to_path_buf()]),
         };
         let permissions = Permissions::from_options(&permission_options);
