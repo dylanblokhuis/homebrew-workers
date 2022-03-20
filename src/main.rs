@@ -3,7 +3,6 @@ use axum::body::Body;
 use axum::extract::Extension;
 use axum::http::{Request, Response, StatusCode};
 use axum::{routing::get, Router};
-use rand::prelude::SliceRandom;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -20,12 +19,18 @@ struct AppState {
 
 #[tokio::main]
 async fn main() {
-    let app = App::new(
-        "some-app".into(),
-        PathBuf::from_str("./some-app").unwrap(),
-        "main.js".into(),
-    );
-    let apps = vec![app];
+    let apps = vec![
+        App::new(
+            "example-worker".into(),
+            PathBuf::from_str("./test/example-worker").unwrap(),
+            "worker.js".into(),
+        ),
+        App::new(
+            "some-app".into(),
+            PathBuf::from_str("./some-app").unwrap(),
+            "main.js".into(),
+        ),
+    ];
     let app_state = Arc::new(AppState { apps });
 
     let app = Router::new()
@@ -57,7 +62,7 @@ async fn handler(
         let runtime_channel = app.get_runtime().await;
         runtime_channel.send((req, tx)).await.unwrap();
     } else {
-        let app = state.apps.choose(&mut rand::thread_rng());
+        let app = state.apps.get(0);
         if let Some(app) = app {
             let runtime_channel = app.get_runtime().await;
             runtime_channel.send((req, tx)).await.unwrap();
