@@ -19,7 +19,7 @@ use deno_runtime::BootstrapOptions;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -173,14 +173,15 @@ struct Test {
 }
 
 pub async fn run_with_existing_runtime(
-    name: String,
+    script_path: PathBuf,
     js_runtime: &mut JsRuntime,
     request: Request<Body>,
 ) -> JsResponse {
     {
-        let path = Path::new("./some-app/main.js");
-        let js_code = std::fs::read_to_string(path).unwrap();
-        js_runtime.execute_script(name.as_str(), &js_code).unwrap();
+        let js_code = std::fs::read_to_string(script_path.as_path()).unwrap();
+        js_runtime
+            .execute_script(script_path.to_str().unwrap(), &js_code)
+            .unwrap();
     }
 
     {

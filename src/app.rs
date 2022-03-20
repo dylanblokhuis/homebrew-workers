@@ -27,14 +27,16 @@ type RuntimeChannelPayload = (Request<Body>, oneshot::Sender<V8HandlerResponse>)
 pub struct App {
     pub name: String,
     pub path: PathBuf,
-    pub runtime: Arc<RwLock<Option<mpsc::Sender<RuntimeChannelPayload>>>>,
+    pub script_file_name: String,
+    runtime: Arc<RwLock<Option<mpsc::Sender<RuntimeChannelPayload>>>>,
 }
 
 impl App {
-    pub fn new(name: String, path: PathBuf) -> Self {
+    pub fn new(name: String, path: PathBuf, script_file_name: String) -> Self {
         Self {
             name,
             path,
+            script_file_name,
             runtime: Arc::new(RwLock::new(None)),
         }
     }
@@ -64,7 +66,9 @@ impl App {
         let permissions = Permissions::from_options(&permission_options);
         let (tx, mut rx) = mpsc::channel::<RuntimeChannelPayload>(10);
 
-        let name = self.name.clone();
+        let mut pathbuf = self.path.to_owned();
+        pathbuf.push(self.script_file_name.clone());
+
         thread::spawn(move || {
             let mut runtime = spawn_v8_isolate(permissions);
 
@@ -75,7 +79,7 @@ impl App {
                 .build()
                 .unwrap()
                 .block_on(async {
-                    handle_request(name, &mut runtime, &mut rx).await;
+                    handle_request(pathbuf, &mut runtime, &mut rx).await;
                 });
         });
 
@@ -125,14 +129,14 @@ fn spawn_v8_isolate(permissions: Permissions) -> JsRuntime {
 }
 
 async fn handle_request(
-    name: String,
+    script_path: PathBuf,
     runtime: &mut JsRuntime,
     rx: &mut mpsc::Receiver<RuntimeChannelPayload>,
 ) {
     loop {
         tokio::select! {
             Some((request, oneshot_tx)) = rx.recv() => {
-                let js_response = runtime::run_with_existing_runtime(name.clone(), runtime, request).await;
+                let js_response = runtime::run_with_existing_runtime(script_path.clone(), runtime, request).await;
                 let mut response = Response::new(Body::try_from(js_response.body).unwrap());
                 let headers = response.headers_mut();
                 for (key, value) in js_response.headers {

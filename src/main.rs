@@ -21,11 +21,11 @@ struct AppState {
 #[tokio::main]
 async fn main() {
     let app = App::new(
-        "some-app".to_string(),
+        "some-app".into(),
         PathBuf::from_str("./some-app").unwrap(),
+        "main.js".into(),
     );
     let apps = vec![app];
-
     let app_state = Arc::new(AppState { apps });
 
     let app = Router::new()
