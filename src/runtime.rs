@@ -136,8 +136,19 @@ pub fn init(permissions: Permissions, mut options: RunOptions) -> deno_core::JsR
         .unwrap();
 
     let worker_funcs_script = r#"
-    function respondWith(response) {
-        window.requestResult = response
+    async function respondWith(response) {
+        const serialized = {
+            headers: Object.fromEntries(response.headers),
+            ok: response.ok,
+            redirected: response.redirected,
+            status: response.status,
+            statusText: response.statusText,
+            trailer: response.trailer,
+            type: response.type,
+            body: await response.text()
+        }
+        
+        window.requestResult = serialized
     }
 
     window.respondWith = respondWith
@@ -148,6 +159,17 @@ pub fn init(permissions: Permissions, mut options: RunOptions) -> deno_core::JsR
         .unwrap();
 
     js_runtime
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Test {
+    pub headers: HashMap<String, String>,
+    pub ok: bool,
+    pub redirected: bool,
+    pub status: u16,
+    #[serde(rename = "statusText")]
+    pub status_text: String,
+    body: Option<u32>,
 }
 
 pub async fn run_with_existing_runtime(
@@ -218,6 +240,19 @@ pub async fn run_with_existing_runtime(
     let name = v8::String::new(scope, "requestResult").unwrap();
     let response = global.get(scope, name.into()).unwrap();
     global.delete(scope, name.into()).unwrap();
+
+    // let response_object = v8::Local::<v8::Object>::try_from(response).unwrap();
+
+    // let yo = v8::String::new(scope, "body").unwrap();
+    // let yo = response_object.get(scope, yo.into()).unwrap();
+
+    // let fetchresponse: deno_fetch::FetchResponse = yo..try_into().unwrap();
+    // println!(
+    //     "{:?}",
+    //     yo.try_into()
+    // );
+
+    // let test: Test = deno_core::serde_v8::from_v8(scope, response).expect("failed to deserialize");
 
     let js_response: JsResponse = deno_core::serde_v8::from_v8(scope, response).unwrap();
     js_response

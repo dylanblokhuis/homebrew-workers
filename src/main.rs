@@ -8,7 +8,6 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
-use tokio::sync::mpsc::{self};
 use tokio::sync::oneshot::{self};
 
 mod app;
@@ -16,45 +15,18 @@ mod runtime;
 
 pub type V8HandlerResponse = (StatusCode, Response<Body>);
 struct AppState {
-    tx: mpsc::Sender<(oneshot::Sender<V8HandlerResponse>, Request<Body>)>,
+    apps: Vec<App>,
 }
 
 #[tokio::main]
 async fn main() {
-    // create new runtime channel
-    let (tx, mut rx) = mpsc::channel::<(oneshot::Sender<V8HandlerResponse>, Request<Body>)>(1);
-
     let app = App::new(
         "some-app".to_string(),
         PathBuf::from_str("./some-app").unwrap(),
     );
     let apps = vec![app];
 
-    // signalling here to get the runtime
-    tokio::spawn(async move {
-        while let Some((oneshot_tx, req)) = rx.recv().await {
-            let header = req.headers().get("x-app");
-            if let Some(header_value) = header {
-                let app = apps
-                    .iter()
-                    .find(|it| it.name == header_value.to_str().unwrap())
-                    .unwrap();
-                let runtime_channel = app.get_runtime().await;
-                runtime_channel.send((req, oneshot_tx)).await.unwrap();
-            } else {
-                let app = apps.choose(&mut rand::thread_rng());
-                if let Some(app) = app {
-                    let runtime_channel = app.get_runtime().await;
-                    runtime_channel.send((req, oneshot_tx)).await.unwrap();
-                } else {
-                    let request = Response::new(Body::empty());
-                    oneshot_tx.send((StatusCode::BAD_REQUEST, request)).unwrap();
-                }
-            }
-        }
-    });
-
-    let app_state = Arc::new(AppState { tx });
+    let app_state = Arc::new(AppState { apps });
 
     let app = Router::new()
         .route("/*key", get(handler))
@@ -74,10 +46,26 @@ async fn handler(
     req: Request<Body>,
 ) -> V8HandlerResponse {
     let (tx, rx) = oneshot::channel::<V8HandlerResponse>();
-    state
-        .tx
-        .send((tx, req))
-        .await
-        .expect("state.tx.send failed");
-    rx.await.expect("oneshot_tx failed")
+
+    let header = req.headers().get("x-app");
+    if let Some(header_value) = header {
+        let app = state
+            .apps
+            .iter()
+            .find(|it| it.name == header_value.to_str().unwrap())
+            .unwrap();
+        let runtime_channel = app.get_runtime().await;
+        runtime_channel.send((req, tx)).await.unwrap();
+    } else {
+        let app = state.apps.choose(&mut rand::thread_rng());
+        if let Some(app) = app {
+            let runtime_channel = app.get_runtime().await;
+            runtime_channel.send((req, tx)).await.unwrap();
+        } else {
+            let request = Response::new(Body::empty());
+            tx.send((StatusCode::BAD_REQUEST, request)).unwrap();
+        }
+    }
+
+    rx.await.expect("Failed to receive value from V8 runtime.")
 }

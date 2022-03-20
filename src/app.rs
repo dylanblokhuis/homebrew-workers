@@ -62,7 +62,7 @@ impl App {
             allow_read: Some(vec![self.path.to_path_buf()]),
         };
         let permissions = Permissions::from_options(&permission_options);
-        let (tx, mut rx) = mpsc::channel::<RuntimeChannelPayload>(1);
+        let (tx, mut rx) = mpsc::channel::<RuntimeChannelPayload>(10);
 
         let name = self.name.clone();
         thread::spawn(move || {
@@ -70,14 +70,13 @@ impl App {
 
             tokio::runtime::Builder::new_multi_thread()
                 .thread_name("runtime-pool")
-                .enable_all()
+                .worker_threads(2)
+                .enable_time()
                 .build()
                 .unwrap()
                 .block_on(async {
                     handle_request(name, &mut runtime, &mut rx).await;
                 });
-
-            println!("Closing!");
         });
 
         {
@@ -88,7 +87,6 @@ impl App {
         let runtime2 = self.runtime.clone();
         tokio::spawn(async move {
             tx.closed().await;
-            println!("Closed");
             let mut item = runtime2.write().unwrap();
             *item = None;
         });
