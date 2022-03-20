@@ -1,6 +1,10 @@
 use axum::body::Body;
+use axum::http::header::HeaderName;
 use axum::http::header::HOST;
+use axum::http::HeaderValue;
 use axum::http::Request;
+use axum::http::Response;
+use axum::http::StatusCode;
 use deno_core::error::AnyError;
 use deno_core::located_script_name;
 use deno_core::CompiledWasmModuleStore;
@@ -11,7 +15,6 @@ use deno_core::JsRuntime;
 use deno_core::RuntimeOptions;
 use deno_core::SharedArrayBufferStore;
 use deno_runtime::deno_web::BlobStore;
-use deno_runtime::inspector_server::InspectorServer;
 use deno_runtime::js;
 use deno_runtime::ops;
 use deno_runtime::permissions::Permissions;
@@ -21,17 +24,128 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::str::FromStr;
+use std::time::Duration;
+use tokio::sync::mpsc;
 
-pub struct RunOptions {
+use crate::app::RuntimeChannelPayload;
+
+pub struct Runtime {
+    js_runtime: JsRuntime,
+    script_path: PathBuf,
+}
+
+impl Runtime {
+    pub fn new(script_path: PathBuf, permissions: Permissions) -> Self {
+        Self {
+            js_runtime: init(permissions),
+            script_path,
+        }
+    }
+
+    async fn run(&mut self, request: Request<Body>) -> JsResponse {
+        let js_runtime = &mut self.js_runtime;
+        {
+            let js_code = std::fs::read_to_string(self.script_path.as_path()).unwrap();
+            js_runtime
+                .execute_script(self.script_path.to_str().unwrap(), &js_code)
+                .unwrap();
+        }
+
+        {
+            let scope = &mut js_runtime.handle_scope();
+            let event_obj = v8::Object::new(scope);
+            let request_obj = v8::Object::new(scope);
+
+            let url_key = v8::String::new(scope, "url").unwrap();
+            let url = format!(
+                "http://{}{}",
+                request.headers().get(HOST).unwrap().to_str().unwrap(),
+                request.uri().path()
+            );
+            let url_value = v8::String::new(scope, &url).unwrap();
+
+            request_obj.set(scope, url_key.into(), url_value.into());
+
+            let method_key = v8::String::new(scope, "method").unwrap();
+            let method_value = v8::String::new(scope, request.method().as_str()).unwrap();
+            request_obj.set(scope, method_key.into(), method_value.into());
+
+            let header_key = v8::String::new(scope, "headers").unwrap();
+            let header_object = v8::Object::new(scope);
+            for (key, value) in request.headers() {
+                let key = v8::String::new(scope, key.as_str()).unwrap();
+                let value = v8::String::new(scope, value.to_str().unwrap()).unwrap();
+
+                header_object.set(scope, key.into(), value.into());
+            }
+            request_obj.set(scope, header_key.into(), header_object.into());
+
+            let event_request_key = v8::String::new(scope, "request").unwrap();
+            event_obj.set(scope, event_request_key.into(), request_obj.into());
+            let event_respond_key = v8::String::new(scope, "respondWith").unwrap();
+
+            let context = scope.get_current_context();
+            let global = context.global(scope);
+
+            let respond_with_func = global.get(scope, event_respond_key.into()).unwrap();
+            event_obj.set(scope, event_respond_key.into(), respond_with_func);
+
+            let name = v8::String::new(scope, "onRequest").unwrap();
+            let func = global.get(scope, name.into()).unwrap();
+
+            let cb = v8::Local::<v8::Function>::try_from(func).unwrap();
+            let args = &[event_obj.into()];
+            cb.call(scope, global.into(), args).unwrap();
+        }
+
+        {
+            js_runtime.run_event_loop(false).await.unwrap();
+        }
+
+        let context = js_runtime.global_context();
+        let scope = &mut js_runtime.handle_scope();
+        let global = context.open(scope).global(scope);
+        let name = v8::String::new(scope, "requestResult").unwrap();
+        let response = global.get(scope, name.into()).unwrap();
+        global.delete(scope, name.into()).unwrap();
+
+        let js_response: JsResponse = deno_core::serde_v8::from_v8(scope, response).unwrap();
+        js_response
+    }
+
+    pub async fn handle_request(&mut self, rx: &mut mpsc::Receiver<RuntimeChannelPayload>) {
+        loop {
+            tokio::select! {
+                Some((request, oneshot_tx)) = rx.recv() => {
+                    let js_response = self.run(request).await;
+                    let mut response = Response::new(Body::try_from(js_response.body).unwrap());
+                    let headers = response.headers_mut();
+                    for (key, value) in js_response.headers {
+                        headers.insert(
+                            HeaderName::from_str(key.as_str()).unwrap(),
+                            HeaderValue::from_str(value.as_str()).unwrap(),
+                        );
+                    }
+
+                    oneshot_tx.send((StatusCode::OK, response)).unwrap();
+                }
+                _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                    println!("5 seconds passed without a request, so we're killing this runtime.");
+                    break;
+                }
+            }
+        }
+    }
+}
+
+struct RunOptions {
     pub bootstrap: BootstrapOptions,
     pub extensions: Vec<Extension>,
     pub unsafely_ignore_certificate_errors: Option<Vec<String>>,
     pub user_agent: String,
     pub seed: Option<u64>,
     pub js_error_create_fn: Option<Rc<JsErrorCreateFn>>,
-    pub maybe_inspector_server: Option<Arc<InspectorServer>>,
-    pub should_break_on_first_statement: bool,
     pub get_error_class_fn: Option<GetErrorClassFn>,
     pub blob_store: BlobStore,
     pub shared_array_buffer_store: Option<SharedArrayBufferStore>,
@@ -49,11 +163,36 @@ pub struct JsResponse {
     pub body: String,
 }
 
-pub fn get_error_class_name(e: &AnyError) -> &'static str {
+fn get_error_class_name(e: &AnyError) -> &'static str {
     deno_runtime::errors::get_error_class_name(e).unwrap_or("Error")
 }
 
-pub fn init(permissions: Permissions, mut options: RunOptions) -> deno_core::JsRuntime {
+fn init(permissions: Permissions) -> deno_core::JsRuntime {
+    let mut options = RunOptions {
+        bootstrap: BootstrapOptions {
+            apply_source_maps: false,
+            args: vec![],
+            cpu_count: std::thread::available_parallelism().unwrap().into(),
+            debug_flag: false,
+            enable_testing_features: false,
+            location: None,
+            no_color: false,
+            is_tty: false,
+            runtime_version: "x".to_string(),
+            ts_version: "x".to_string(),
+            unstable: false,
+        },
+        extensions: vec![],
+        unsafely_ignore_certificate_errors: None,
+        user_agent: "hello_runtime".to_string(),
+        seed: Some(32),
+        js_error_create_fn: None,
+        get_error_class_fn: Some(&get_error_class_name),
+        blob_store: BlobStore::default(),
+        shared_array_buffer_store: None,
+        compiled_wasm_module_store: None,
+    };
+
     let unstable = options.bootstrap.unstable;
     let enable_testing_features = options.bootstrap.enable_testing_features;
     let perm_ext = Extension::builder()
@@ -87,7 +226,7 @@ pub fn init(permissions: Permissions, mut options: RunOptions) -> deno_core::JsR
         //     options.unsafely_ignore_certificate_errors.clone(),
         // ),
         // deno_webstorage::init(options.origin_storage_dir.clone()),
-        // deno_crypto::init(options.seed),
+        deno_crypto::init(options.seed),
         // deno_broadcast_channel::init(options.broadcast_channel.clone(), unstable),
         // deno_webgpu::init(unstable),
         // ffi
@@ -102,7 +241,7 @@ pub fn init(permissions: Permissions, mut options: RunOptions) -> deno_core::JsR
         ops::fs::init(),
         ops::io::init(),
         ops::io::init_stdio(),
-        // deno_tls::init(),
+        deno_tls::init(),
         // deno_net::init::<Permissions>(
         //     options.root_cert_store.clone(),
         //     unstable,
@@ -159,102 +298,4 @@ pub fn init(permissions: Permissions, mut options: RunOptions) -> deno_core::JsR
         .unwrap();
 
     js_runtime
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct Test {
-    pub headers: HashMap<String, String>,
-    pub ok: bool,
-    pub redirected: bool,
-    pub status: u16,
-    #[serde(rename = "statusText")]
-    pub status_text: String,
-    body: Option<u32>,
-}
-
-pub async fn run_with_existing_runtime(
-    script_path: PathBuf,
-    js_runtime: &mut JsRuntime,
-    request: Request<Body>,
-) -> JsResponse {
-    {
-        let js_code = std::fs::read_to_string(script_path.as_path()).unwrap();
-        js_runtime
-            .execute_script(script_path.to_str().unwrap(), &js_code)
-            .unwrap();
-    }
-
-    {
-        let scope = &mut js_runtime.handle_scope();
-        let event_obj = v8::Object::new(scope);
-        let request_obj = v8::Object::new(scope);
-
-        let url_key = v8::String::new(scope, "url").unwrap();
-        let url = format!(
-            "http://{}{}",
-            request.headers().get(HOST).unwrap().to_str().unwrap(),
-            request.uri().path()
-        );
-        let url_value = v8::String::new(scope, &url).unwrap();
-
-        request_obj.set(scope, url_key.into(), url_value.into());
-
-        let method_key = v8::String::new(scope, "method").unwrap();
-        let method_value = v8::String::new(scope, request.method().as_str()).unwrap();
-        request_obj.set(scope, method_key.into(), method_value.into());
-
-        let header_key = v8::String::new(scope, "headers").unwrap();
-        let header_object = v8::Object::new(scope);
-        for (key, value) in request.headers() {
-            let key = v8::String::new(scope, key.as_str()).unwrap();
-            let value = v8::String::new(scope, value.to_str().unwrap()).unwrap();
-
-            header_object.set(scope, key.into(), value.into());
-        }
-        request_obj.set(scope, header_key.into(), header_object.into());
-
-        let event_request_key = v8::String::new(scope, "request").unwrap();
-        event_obj.set(scope, event_request_key.into(), request_obj.into());
-        let event_respond_key = v8::String::new(scope, "respondWith").unwrap();
-
-        let context = scope.get_current_context();
-        let global = context.global(scope);
-
-        let respond_with_func = global.get(scope, event_respond_key.into()).unwrap();
-        event_obj.set(scope, event_respond_key.into(), respond_with_func);
-
-        let name = v8::String::new(scope, "onRequest").unwrap();
-        let func = global.get(scope, name.into()).unwrap();
-
-        let cb = v8::Local::<v8::Function>::try_from(func).unwrap();
-        let args = &[event_obj.into()];
-        cb.call(scope, global.into(), args).unwrap();
-    }
-
-    {
-        js_runtime.run_event_loop(false).await.unwrap();
-    }
-
-    let context = js_runtime.global_context();
-    let scope = &mut js_runtime.handle_scope();
-    let global = context.open(scope).global(scope);
-    let name = v8::String::new(scope, "requestResult").unwrap();
-    let response = global.get(scope, name.into()).unwrap();
-    global.delete(scope, name.into()).unwrap();
-
-    // let response_object = v8::Local::<v8::Object>::try_from(response).unwrap();
-
-    // let yo = v8::String::new(scope, "body").unwrap();
-    // let yo = response_object.get(scope, yo.into()).unwrap();
-
-    // let fetchresponse: deno_fetch::FetchResponse = yo..try_into().unwrap();
-    // println!(
-    //     "{:?}",
-    //     yo.try_into()
-    // );
-
-    // let test: Test = deno_core::serde_v8::from_v8(scope, response).expect("failed to deserialize");
-
-    let js_response: JsResponse = deno_core::serde_v8::from_v8(scope, response).unwrap();
-    js_response
 }
