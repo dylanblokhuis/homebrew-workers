@@ -1814,6 +1814,7 @@ name = "homebrew-workers"
 version = "0.1.0"
 dependencies = [
  "api",
+ "dotenv",
  "entity",
  "migration",
  "tokio",

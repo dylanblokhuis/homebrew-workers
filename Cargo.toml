@@ -13,3 +13,4 @@ workers = { path = "workers"}
 entity = { path = "entity" }
 migration = { path = "migration" }
 api = { path = "api" }
+dotenv = "0.15.0"

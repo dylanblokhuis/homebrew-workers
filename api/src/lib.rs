@@ -11,6 +11,7 @@ use tower_http::ServiceBuilderExt;
 
 use crate::admin::router;
 use crate::middleware::auth::authorize_route;
+
 mod admin;
 mod middleware;
 

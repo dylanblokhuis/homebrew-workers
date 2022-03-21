@@ -3,7 +3,6 @@ use axum::body::Body;
 use axum::extract::Extension;
 use axum::http::{Request, Response, StatusCode};
 use axum::{routing::get, Router};
-use dotenv::dotenv;
 use migration::sea_orm::Database;
 use migration::{Migrator, MigratorTrait};
 use std::net::SocketAddr;
@@ -21,8 +20,6 @@ struct AppState {
 }
 
 pub async fn run() {
-    dotenv().ok();
-
     let conn = Database::connect(
         std::env::var("DATABASE_URL")
             .expect("No DATABASE_URL environment variable found.")
