@@ -3,8 +3,8 @@ use dotenv::dotenv;
 #[tokio::main]
 async fn main() {
     dotenv().ok();
-    let worker_server = workers::run();
-    let api_server = api::run();
+    let worker_server = tokio::spawn(async move { workers::run().await });
+    let api_server = tokio::spawn(async move { api::run().await });
 
-    tokio::join!(worker_server, api_server);
+    let (_, _) = tokio::join!(worker_server, api_server);
 }
