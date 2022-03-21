@@ -1,10 +1,10 @@
-use entity::store::*;
+use entity::user::*;
 use sea_schema::migration::prelude::*;
 pub struct Migration;
 
 impl MigrationName for Migration {
     fn name(&self) -> &str {
-        "m20220101_000001_create_store_table.rs"
+        "m20220321_122000_create_users_table.rs"
     }
 }
 
@@ -23,8 +23,9 @@ impl MigrationTrait for Migration {
                             .auto_increment()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(Column::Key).string().not_null())
-                    .col(ColumnDef::new(Column::Value).string().not_null())
+                    .col(ColumnDef::new(Column::Name).string().not_null())
+                    .col(ColumnDef::new(Column::ClientId).string().not_null())
+                    .col(ColumnDef::new(Column::ClientSecret).string().not_null())
                     .col(ColumnDef::new(Column::CreatedAt).timestamp().not_null())
                     .to_owned(),
             )

@@ -45,6 +45,7 @@ impl Runtime {
 
     async fn run(&mut self, request: Request<Body>) -> JsResponse {
         let js_runtime = &mut self.js_runtime;
+
         {
             let js_code = std::fs::read_to_string(self.script_path.as_path()).unwrap();
             js_runtime
@@ -103,15 +104,25 @@ impl Runtime {
             js_runtime.run_event_loop(false).await.unwrap();
         }
 
-        let context = js_runtime.global_context();
-        let scope = &mut js_runtime.handle_scope();
-        let global = context.open(scope).global(scope);
-        let name = v8::String::new(scope, "requestResult").unwrap();
-        let response = global.get(scope, name.into()).unwrap();
-        global.delete(scope, name.into()).unwrap();
+        let js_response = {
+            let context = js_runtime.global_context();
+            let scope = &mut js_runtime.handle_scope();
+            let global = context.open(scope).global(scope);
+            let name = v8::String::new(scope, "requestResult").unwrap();
+            let response = global.get(scope, name.into()).unwrap();
+            global.delete(scope, name.into()).unwrap();
 
-        let js_response: JsResponse = deno_core::serde_v8::from_v8(scope, response).unwrap();
+            let js_response: JsResponse = deno_core::serde_v8::from_v8(scope, response).unwrap();
+
+            js_response
+        };
+
         js_response
+    }
+
+    pub fn terminate(&mut self) {
+        let isolate = self.js_runtime.v8_isolate().thread_safe_handle();
+        isolate.terminate_execution();
     }
 
     pub async fn handle_request(&mut self, rx: &mut mpsc::Receiver<RuntimeChannelPayload>) {
@@ -132,6 +143,7 @@ impl Runtime {
                 }
                 _ = tokio::time::sleep(Duration::from_secs(5)) => {
                     println!("5 seconds passed without a request, so we're killing this runtime.");
+                    self.terminate();
                     break;
                 }
             }
