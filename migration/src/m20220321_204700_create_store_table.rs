@@ -1,4 +1,4 @@
-use entity::store::*;
+use entity::{namespace, store::*};
 use sea_schema::migration::prelude::*;
 pub struct Migration;
 
@@ -25,10 +25,23 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(Column::Key).string().not_null())
                     .col(ColumnDef::new(Column::Value).string().not_null())
+                    .col(ColumnDef::new(Column::NamespaceId).integer().not_null())
                     .col(ColumnDef::new(Column::CreatedAt).timestamp().not_null())
                     .to_owned(),
             )
-            .await
+            .await?;
+
+        manager
+            .create_foreign_key(
+                ForeignKey::create()
+                    .from(Entity, Column::NamespaceId)
+                    .to(namespace::Entity, namespace::Column::Id)
+                    .on_delete(ForeignKeyAction::Cascade)
+                    .to_owned(),
+            )
+            .await?;
+
+        Ok(())
     }
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {

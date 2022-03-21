@@ -2,5 +2,6 @@
 
 pub mod prelude;
 
+pub mod namespace;
 pub mod store;
 pub mod user;
