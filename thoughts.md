@@ -11,3 +11,10 @@ async function onRequest(event) {
   event.respondWith(new Response(value);
 }
 ```
+
+## roadmap?
+
+1. implement admin route to create users
+2. implement script uploading
+3. implement user route to create namespaces
+4. implement kv ops for workers
