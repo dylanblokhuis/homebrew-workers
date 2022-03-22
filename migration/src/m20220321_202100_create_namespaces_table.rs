@@ -25,7 +25,11 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(Column::Name).string().not_null())
                     .col(ColumnDef::new(Column::UserId).integer().not_null())
-                    .col(ColumnDef::new(Column::CreatedAt).timestamp().not_null())
+                    .col(
+                        ColumnDef::new(Column::CreatedAt)
+                            .timestamp_with_time_zone()
+                            .not_null(),
+                    )
                     .to_owned(),
             )
             .await?;

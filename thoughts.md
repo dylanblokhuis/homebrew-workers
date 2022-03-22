@@ -6,7 +6,7 @@ use stores table and store the kv values here with the namespace
 async function onRequest(event) {
   await KV.NAMESPACE.set("foo", "bar");
 
-  const value = await KV.NAMESPACE..get("foo");
+  const value = await KV.NAMESPACE.get("foo");
 
   event.respondWith(new Response(value);
 }

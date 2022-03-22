@@ -24,9 +24,18 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(ColumnDef::new(Column::Name).string().not_null())
-                    .col(ColumnDef::new(Column::ClientId).string().not_null())
+                    .col(
+                        ColumnDef::new(Column::ClientId)
+                            .string()
+                            .unique_key()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(Column::ClientSecret).string().not_null())
-                    .col(ColumnDef::new(Column::CreatedAt).timestamp().not_null())
+                    .col(
+                        ColumnDef::new(Column::CreatedAt)
+                            .timestamp_with_time_zone()
+                            .not_null(),
+                    )
                     .to_owned(),
             )
             .await

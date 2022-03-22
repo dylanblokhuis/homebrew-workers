@@ -1,14 +1,16 @@
 use axum::{
     async_trait,
     body::BoxBody,
-    extract::{FromRequest, RequestParts, TypedHeader},
+    extract::{Extension, FromRequest, RequestParts, TypedHeader},
     headers::{authorization::Bearer, Authorization},
     http::{Request, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
     Json,
 };
+use entity::user;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use migration::sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -21,6 +23,7 @@ static KEYS: Lazy<Keys> = Lazy::new(|| {
 // should be post
 pub async fn authorize_route(
     Json(payload): Json<AuthPayload>,
+    Extension(ref conn): Extension<DatabaseConnection>,
 ) -> Result<Json<AuthBody>, AuthError> {
     if payload.client_id.is_empty() || payload.client_secret.is_empty() {
         return Err(AuthError::MissingCredentials);
@@ -34,21 +37,26 @@ pub async fn authorize_route(
 
     if payload.client_id == admin_client_id || payload.client_secret == admin_client_secret {
         claims = Some(Claims {
-            sub: "Admin".into(),
+            sub: 0,
             is_admin: true,
             exp: 2000000000,
         });
     }
 
-    //TODO: stuff for non admins
-    // if false {
-    //     claims = Some(Claims {
-    //         sub: "b@b.com".to_owned(),
-    //         is_admin: false,
-    //         exp: 2000000000,
-    //     });
-    //     return Err(AuthError::WrongCredentials);
-    // }
+    let maybe_user = user::Entity::find()
+        .filter(user::Column::ClientId.starts_with(payload.client_id.as_str()))
+        .filter(user::Column::ClientSecret.starts_with(payload.client_secret.as_str()))
+        .one(conn)
+        .await
+        .unwrap();
+
+    if let Some(user) = maybe_user {
+        claims = Some(Claims {
+            sub: user.id,
+            is_admin: false,
+            exp: 2000000000,
+        });
+    }
 
     if claims.is_none() {
         return Err(AuthError::WrongCredentials);
@@ -151,7 +159,7 @@ impl Keys {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
-    sub: String,
+    sub: i32,
     is_admin: bool,
     exp: usize,
 }

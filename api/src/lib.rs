@@ -39,7 +39,7 @@ pub async fn run() {
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3001));
 
-    println!("Admin listening on {}", addr);
+    println!("Api listening on {}", addr);
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await
