@@ -4,7 +4,6 @@ use axum::extract::Extension;
 use axum::http::{Request, Response, StatusCode};
 use axum::{routing::get, Router};
 use migration::sea_orm::Database;
-use migration::{Migrator, MigratorTrait};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -27,8 +26,6 @@ pub async fn run() {
     )
     .await
     .expect("Database connection failed");
-
-    Migrator::up(&conn, None).await.unwrap();
 
     let apps = vec![
         App::new(

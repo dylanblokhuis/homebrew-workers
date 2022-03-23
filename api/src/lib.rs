@@ -3,7 +3,6 @@ use axum::http::header;
 use axum::routing::post;
 use axum::Router;
 use migration::sea_orm::Database;
-use migration::{Migrator, MigratorTrait};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tower::ServiceBuilder;
@@ -23,8 +22,6 @@ pub async fn run() {
     )
     .await
     .expect("Database connection failed");
-
-    Migrator::up(&conn, None).await.unwrap();
 
     let sensitive_headers: Arc<[_]> = vec![header::AUTHORIZATION, header::COOKIE].into();
     let middleware = ServiceBuilder::new()
