@@ -2,7 +2,7 @@ FROM rust:latest AS chef
 # We only pay the installation cost once, 
 # it will be cached from the second build onwards
 RUN cargo install cargo-chef 
-WORKDIR app
+WORKDIR /app
 
 FROM chef AS planner
 COPY . .
@@ -18,7 +18,6 @@ RUN cargo build --release --bin homebrew-workers
 
 # We do not need the Rust toolchain to run the binary!
 FROM debian:stable as runtime
-WORKDIR app
 COPY . .
 COPY --from=builder /app/target/release/homebrew-workers /usr/local/bin
 EXPOSE 3000
