@@ -8,11 +8,12 @@ use std::sync::Arc;
 use tower::ServiceBuilder;
 use tower_http::ServiceBuilderExt;
 
-use crate::admin::router;
 use crate::middleware::auth::authorize_route;
 
 mod admin;
+mod errors;
 mod middleware;
+mod user;
 
 pub async fn run() {
     let conn = Database::connect(
@@ -30,7 +31,8 @@ pub async fn run() {
 
     let app = Router::new()
         .route("/authorize", post(authorize_route))
-        .nest("/admin", router())
+        .nest("/admin", admin::router())
+        .nest("/:user_id", user::router())
         .layer(Extension(conn))
         .layer(middleware);
 

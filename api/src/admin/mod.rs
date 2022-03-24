@@ -1,6 +1,5 @@
 use axum::extract::Path;
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
+use axum::response::IntoResponse;
 use axum::{body, extract::Extension, routing::get, Json, Router};
 use entity::user;
 use migration::sea_orm::ActiveValue::Set;
@@ -11,6 +10,7 @@ use serde::Deserialize;
 use tower::ServiceBuilder;
 use tower_http::ServiceBuilderExt;
 
+use crate::errors::ApiError;
 use crate::middleware::auth::is_admin_middleware;
 
 pub fn router() -> Router {
@@ -27,11 +27,11 @@ pub fn router() -> Router {
 #[axum_macros::debug_handler]
 async fn get_users(
     Extension(ref conn): Extension<DatabaseConnection>,
-) -> Result<Json<Vec<user::Model>>, AdminError> {
+) -> Result<Json<Vec<user::Model>>, ApiError> {
     let items = user::Entity::find()
         .all(conn)
         .await
-        .map_err(|_| AdminError::SomethingWentWrong)?;
+        .map_err(|_| ApiError::SomethingWentWrong)?;
 
     Ok(Json(items))
 }
@@ -45,7 +45,7 @@ struct CreateUser {
 async fn create_user(
     Json(params): Json<CreateUser>,
     Extension(ref conn): Extension<DatabaseConnection>,
-) -> Result<Json<String>, AdminError> {
+) -> Result<Json<String>, ApiError> {
     let client_id: String = rand::thread_rng()
         .sample_iter(&Alphanumeric)
         .take(32)
@@ -69,7 +69,7 @@ async fn create_user(
     let insert_res = user::Entity::insert(to_be_inserted)
         .exec(conn)
         .await
-        .map_err(|_| AdminError::SomethingWentWrong)?;
+        .map_err(|_| ApiError::SomethingWentWrong)?;
 
     Ok(Json(format!("Created user: {}", insert_res.last_insert_id)))
 }
@@ -82,10 +82,10 @@ async fn get_user_by_id(
     let maybe_user = user::Entity::find_by_id(user_id)
         .one(conn)
         .await
-        .map_err(|_| AdminError::SomethingWentWrong)?;
+        .map_err(|_| ApiError::SomethingWentWrong)?;
 
     if maybe_user.is_none() {
-        return Err(AdminError::IdNotFound);
+        return Err(ApiError::IdNotFound);
     }
 
     Ok(Json(maybe_user.unwrap()))
@@ -99,37 +99,15 @@ async fn delete_user_by_id(
     let maybe_user = user::Entity::find_by_id(user_id)
         .one(conn)
         .await
-        .map_err(|_| AdminError::SomethingWentWrong)?;
+        .map_err(|_| ApiError::SomethingWentWrong)?;
 
     if let Some(user) = maybe_user {
         user.delete(conn)
             .await
-            .map_err(|_| AdminError::SomethingWentWrong)?;
+            .map_err(|_| ApiError::SomethingWentWrong)?;
 
         Ok(Json("Deleted user succesfully"))
     } else {
-        Err(AdminError::IdNotFound)
-    }
-}
-
-enum AdminError {
-    SomethingWentWrong,
-    IdNotFound,
-}
-
-impl IntoResponse for AdminError {
-    fn into_response(self) -> Response {
-        let (body, status_code) = match self {
-            AdminError::SomethingWentWrong => (
-                body::boxed(body::Full::from("Something went wrong")),
-                StatusCode::INTERNAL_SERVER_ERROR,
-            ),
-            AdminError::IdNotFound => (
-                body::boxed(body::Full::from("This record does not exist")),
-                StatusCode::NOT_FOUND,
-            ),
-        };
-
-        Response::builder().status(status_code).body(body).unwrap()
+        Err(ApiError::IdNotFound)
     }
 }
