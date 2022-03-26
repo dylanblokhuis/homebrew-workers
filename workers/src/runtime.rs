@@ -32,26 +32,17 @@ use crate::app::RuntimeChannelPayload;
 
 pub struct Runtime {
     js_runtime: JsRuntime,
-    script_path: PathBuf,
 }
 
 impl Runtime {
     pub fn new(script_path: PathBuf, permissions: Permissions) -> Self {
         Self {
-            js_runtime: init(permissions),
-            script_path,
+            js_runtime: init(script_path, permissions),
         }
     }
 
     async fn run(&mut self, request: Request<Body>) -> JsResponse {
         let js_runtime = &mut self.js_runtime;
-
-        {
-            let js_code = std::fs::read_to_string(self.script_path.as_path()).unwrap();
-            js_runtime
-                .execute_script(self.script_path.to_str().unwrap(), &js_code)
-                .unwrap();
-        }
 
         {
             let scope = &mut js_runtime.handle_scope();
@@ -179,7 +170,7 @@ fn get_error_class_name(e: &AnyError) -> &'static str {
     deno_runtime::errors::get_error_class_name(e).unwrap_or("Error")
 }
 
-fn init(permissions: Permissions) -> deno_core::JsRuntime {
+fn init(script_path: PathBuf, permissions: Permissions) -> deno_core::JsRuntime {
     let mut options = RunOptions {
         bootstrap: BootstrapOptions {
             apply_source_maps: false,
@@ -307,6 +298,11 @@ fn init(permissions: Permissions) -> deno_core::JsRuntime {
 
     js_runtime
         .execute_script("worker_funcs", worker_funcs_script)
+        .unwrap();
+
+    let js_code = std::fs::read_to_string(script_path.as_path()).unwrap();
+    js_runtime
+        .execute_script(script_path.to_str().unwrap(), &js_code)
         .unwrap();
 
     js_runtime
