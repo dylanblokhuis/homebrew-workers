@@ -277,9 +277,10 @@ fn init(script_path: PathBuf, permissions: Permissions) -> deno_core::JsRuntime 
         .execute_script(&located_script_name!(), &script)
         .unwrap();
 
-    let worker_funcs_script = r#"
-    async function respondWith(response) {
-        const serialized = {
+    let worker_funcs_script = format!(
+        r#"
+    async function respondWith(response) {{
+        const serialized = {{
             headers: Object.fromEntries(response.headers),
             ok: response.ok,
             redirected: response.redirected,
@@ -288,16 +289,19 @@ fn init(script_path: PathBuf, permissions: Permissions) -> deno_core::JsRuntime 
             trailer: response.trailer,
             type: response.type,
             body: await response.text()
-        }
+        }}
         
         window.requestResult = serialized
-    }
+    }}
 
     window.respondWith = respondWith
-    "#;
+    window.cwd = "{}";
+    "#,
+        script_path.parent().unwrap().to_str().unwrap()
+    );
 
     js_runtime
-        .execute_script("worker_funcs", worker_funcs_script)
+        .execute_script("worker_funcs", worker_funcs_script.as_str())
         .unwrap();
 
     let js_code = std::fs::read_to_string(script_path.as_path()).unwrap();

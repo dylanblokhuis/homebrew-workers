@@ -11,6 +11,7 @@ use crate::{runtime::Runtime, V8HandlerResponse};
 
 pub type RuntimeChannelPayload = (Request<Body>, oneshot::Sender<V8HandlerResponse>);
 
+#[derive(Debug)]
 pub struct App {
     pub name: String,
     pub path: PathBuf,
@@ -39,7 +40,7 @@ impl App {
     }
 
     async fn new_worker(&self) {
-        println!("New worker spawned");
+        println!("New worker spawned from {:?}", self.path);
         let permission_options = PermissionsOptions {
             allow_env: None,
             allow_ffi: None,

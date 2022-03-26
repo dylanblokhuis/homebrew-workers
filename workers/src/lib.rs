@@ -1,14 +1,17 @@
 use app::App;
+use async_zip::read::mem::ZipFileReader;
 use axum::body::Body;
 use axum::extract::Extension;
 use axum::http::{Request, Response, StatusCode};
 use axum::{routing::get, Router};
-use migration::sea_orm::Database;
+use migration::sea_orm::{Database, DatabaseConnection, EntityTrait};
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::oneshot::{self};
+
+use entity::user;
 
 mod app;
 mod runtime;
@@ -27,18 +30,7 @@ pub async fn run() {
     .await
     .expect("Database connection failed");
 
-    let apps = vec![
-        App::new(
-            "some-app".into(),
-            PathBuf::from_str("./some-app").unwrap(),
-            "main.js".into(),
-        ),
-        App::new(
-            "example-worker".into(),
-            PathBuf::from_str("./test/example-worker").unwrap(),
-            "worker.js".into(),
-        ),
-    ];
+    let apps = setup(conn).await;
     let app_state = Arc::new(AppState { apps });
 
     let worker_app = Router::new()
@@ -52,6 +44,95 @@ pub async fn run() {
         .serve(worker_app.into_make_service())
         .await
         .unwrap();
+}
+
+fn init_bucket() -> s3::Bucket {
+    let credentials = s3::creds::Credentials::new(
+        Some(
+            std::env::var("S3_ACCESS_KEY")
+                .expect("S3_ACCESS_KEY not found")
+                .as_str(),
+        ),
+        Some(
+            std::env::var("S3_SECRET_KEY")
+                .expect("S3_SECRET_KEY not found")
+                .as_str(),
+        ),
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+
+    let region = s3::Region::Custom {
+        region: std::env::var("S3_REGION").expect("S3_REGION not found"),
+        endpoint: std::env::var("S3_ENDPOINT").expect("S3_ENDPOINT not found"),
+    };
+
+    let bucket = s3::Bucket::new_with_path_style(
+        std::env::var("S3_BUCKET")
+            .expect("S3_BUCKET not found")
+            .as_str(),
+        region,
+        credentials,
+    )
+    .unwrap();
+
+    bucket
+}
+
+async fn setup(conn: DatabaseConnection) -> Vec<App> {
+    let bucket = init_bucket();
+    let users = user::Entity::find()
+        .all(&conn)
+        .await
+        .expect("Failed to setup the initial users");
+
+    let mut apps = vec![];
+    for user in users.iter() {
+        let path = user.latest_deployment.as_ref();
+        if path.is_none() {
+            continue;
+        }
+
+        let (bytes, code) = bucket.get_object(path.unwrap()).await.unwrap();
+        if code != 200 {
+            panic!("Couldn't get item from bucket");
+        }
+
+        let parent_dir = format!("/tmp/homebrew-workers/{}", user.id);
+        tokio::fs::remove_dir_all(parent_dir.clone()).await.unwrap();
+        tokio::fs::create_dir_all(parent_dir.clone()).await.unwrap();
+
+        let zip = ZipFileReader::new(&bytes).await.unwrap();
+        let mut zip_2 = ZipFileReader::new(&bytes).await.unwrap();
+
+        for (index, entry) in zip.entries().iter().enumerate() {
+            if entry.dir() {
+                continue;
+            }
+
+            let reader = zip_2.entry_reader(index).await.unwrap();
+            let path_str = format!("{}/{}", parent_dir.clone(), entry.name());
+            let path = Path::new(&path_str);
+            tokio::fs::create_dir_all(path.parent().unwrap())
+                .await
+                .unwrap();
+
+            let mut output = tokio::fs::File::create(path).await.unwrap();
+            reader.copy_to_end_crc(&mut output, 65536).await.unwrap();
+        }
+
+        let app = App::new(
+            user.name.clone(),
+            PathBuf::from_str(parent_dir.clone().as_str()).unwrap(),
+            "main.js".into(),
+        );
+
+        apps.push(app);
+    }
+
+    apps
 }
 
 #[axum_macros::debug_handler]

@@ -18,7 +18,6 @@ RUN cargo build --release --bin homebrew-workers
 
 # We do not need the Rust toolchain to run the binary!
 FROM debian:stable as runtime
-COPY . .
 COPY --from=builder /app/target/release/homebrew-workers /usr/local/bin
 EXPOSE 3000
 CMD [ "homebrew-workers" ]
