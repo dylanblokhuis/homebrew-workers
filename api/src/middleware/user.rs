@@ -4,18 +4,16 @@ use axum::{
     headers::{authorization::Bearer, Authorization},
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use entity::user;
 use jsonwebtoken::{decode, Validation};
 use migration::sea_orm::{DatabaseConnection, EntityTrait};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 use super::auth::Claims;
 
 #[derive(Serialize, Deserialize)]
-pub struct User(user::Model);
+pub struct User(pub user::Model);
 
 #[async_trait]
 impl<B> FromRequest<B> for User
@@ -74,10 +72,8 @@ impl IntoResponse for UserError {
                 "Not authorized to access this user",
             ),
         };
-        let body = Json(json!({
-            "error": error_message,
-        }));
-        (status, body).into_response()
+
+        (status, error_message).into_response()
     }
 }
 

@@ -28,10 +28,7 @@ pub fn router() -> Router {
 async fn get_users(
     Extension(ref conn): Extension<DatabaseConnection>,
 ) -> Result<Json<Vec<user::Model>>, ApiError> {
-    let items = user::Entity::find()
-        .all(conn)
-        .await
-        .map_err(|_| ApiError::SomethingWentWrong)?;
+    let items = user::Entity::find().all(conn).await.map_err(ApiError::db)?;
 
     Ok(Json(items))
 }
@@ -69,7 +66,7 @@ async fn create_user(
     let insert_res = user::Entity::insert(to_be_inserted)
         .exec(conn)
         .await
-        .map_err(|_| ApiError::SomethingWentWrong)?;
+        .map_err(|_| ApiError::empty(500))?;
 
     Ok(Json(format!("Created user: {}", insert_res.last_insert_id)))
 }
@@ -82,10 +79,10 @@ async fn get_user_by_id(
     let maybe_user = user::Entity::find_by_id(user_id)
         .one(conn)
         .await
-        .map_err(|_| ApiError::SomethingWentWrong)?;
+        .map_err(ApiError::db)?;
 
     if maybe_user.is_none() {
-        return Err(ApiError::IdNotFound);
+        return Err(ApiError::new(404, "No user found with this id"));
     }
 
     Ok(Json(maybe_user.unwrap()))
@@ -99,15 +96,13 @@ async fn delete_user_by_id(
     let maybe_user = user::Entity::find_by_id(user_id)
         .one(conn)
         .await
-        .map_err(|_| ApiError::SomethingWentWrong)?;
+        .map_err(ApiError::db)?;
 
     if let Some(user) = maybe_user {
-        user.delete(conn)
-            .await
-            .map_err(|_| ApiError::SomethingWentWrong)?;
+        user.delete(conn).await.map_err(ApiError::db)?;
 
         Ok(Json("Deleted user succesfully"))
     } else {
-        Err(ApiError::IdNotFound)
+        Err(ApiError::new(404, "No user found with this id"))
     }
 }

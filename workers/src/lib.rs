@@ -29,14 +29,14 @@ pub async fn run() {
 
     let apps = vec![
         App::new(
-            "example-worker".into(),
-            PathBuf::from_str("./test/example-worker").unwrap(),
-            "worker.js".into(),
-        ),
-        App::new(
             "some-app".into(),
             PathBuf::from_str("./some-app").unwrap(),
             "main.js".into(),
+        ),
+        App::new(
+            "example-worker".into(),
+            PathBuf::from_str("./test/example-worker").unwrap(),
+            "worker.js".into(),
         ),
     ];
     let app_state = Arc::new(AppState { apps });

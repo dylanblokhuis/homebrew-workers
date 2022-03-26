@@ -11,6 +11,7 @@ pub struct Model {
     pub name: String,
     pub client_id: String,
     pub client_secret: String,
+    pub latest_deployment: Option<String>,
     pub created_at: DateTimeWithTimeZone,
 }
 
