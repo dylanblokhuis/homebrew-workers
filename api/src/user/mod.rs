@@ -54,7 +54,7 @@ async fn deploy(
     let (_, code) = bucket
         .put_object_with_content_type(&file_name, &bytes.to_vec(), "application/zip")
         .await
-        .map_err(|_| ApiError::empty(500))?;
+        .map_err(|_| ApiError::new(500, "Failed to send request to S3 storage"))?;
     println!("{:?}", code);
 
     if code != 200 {

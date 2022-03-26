@@ -101,7 +101,9 @@ async fn setup(conn: DatabaseConnection) -> Vec<App> {
         }
 
         let parent_dir = format!("/tmp/homebrew-workers/{}", user.id);
-        tokio::fs::remove_dir_all(parent_dir.clone()).await.unwrap();
+        tokio::fs::remove_dir_all(parent_dir.clone())
+            .await
+            .unwrap_or(());
         tokio::fs::create_dir_all(parent_dir.clone()).await.unwrap();
 
         let zip = ZipFileReader::new(&bytes).await.unwrap();
