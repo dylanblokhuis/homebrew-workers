@@ -103,6 +103,15 @@ impl Runtime {
             let response = global.get(scope, name.into()).unwrap();
             global.delete(scope, name.into()).unwrap();
 
+            // let body_key = v8::String::new(scope, "body").unwrap();
+            // let body = response
+            //     .to_object(scope)
+            //     .unwrap()
+            //     .get(scope, body_key.into())
+            //     .unwrap();
+            // let uint8array = v8::Local::<v8::Uint8Array>::try_from(body).unwrap();
+            // println!("{:?}", uint8array.copy_contents(dest));
+
             let js_response: JsResponse = deno_core::serde_v8::from_v8(scope, response).unwrap();
 
             js_response
@@ -118,10 +127,15 @@ impl Runtime {
 
     pub async fn handle_request(&mut self, rx: &mut mpsc::Receiver<RuntimeChannelPayload>) {
         loop {
+            let sleep = tokio::time::sleep(Duration::from_secs(5));
+            tokio::pin!(sleep);
+
             tokio::select! {
                 Some((request, oneshot_tx)) = rx.recv() => {
                     let js_response = self.run(request).await;
-                    let mut response = Response::new(Body::try_from(js_response.body).unwrap());
+                    let body = String::from_utf8(js_response.body.to_vec()).unwrap_or_else(|_| "".into());
+
+                    let mut response = Response::new(Body::try_from(body).unwrap());
                     let headers = response.headers_mut();
                     for (key, value) in js_response.headers {
                         headers.insert(
@@ -132,7 +146,7 @@ impl Runtime {
 
                     oneshot_tx.send((StatusCode::OK, response)).unwrap();
                 }
-                _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                _ = &mut sleep => {
                     println!("5 seconds passed without a request, so we're killing this runtime.");
                     self.terminate();
                     break;
@@ -155,7 +169,7 @@ struct RunOptions {
     pub compiled_wasm_module_store: Option<CompiledWasmModuleStore>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct JsResponse {
     pub headers: HashMap<String, String>,
     pub ok: bool,
@@ -163,7 +177,7 @@ pub struct JsResponse {
     pub status: u16,
     #[serde(rename = "statusText")]
     pub status_text: String,
-    pub body: String,
+    pub body: deno_core::serde_v8::Buffer,
 }
 
 fn get_error_class_name(e: &AnyError) -> &'static str {
@@ -288,7 +302,7 @@ fn init(script_path: PathBuf, permissions: Permissions) -> deno_core::JsRuntime 
             statusText: response.statusText,
             trailer: response.trailer,
             type: response.type,
-            body: await response.text()
+            body: new Uint8Array(await response.arrayBuffer())
         }}
         
         window.requestResult = serialized
