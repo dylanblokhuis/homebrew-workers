@@ -326,8 +326,6 @@ fn init(script_path: PathBuf, permissions: Permissions) -> deno_core::JsRuntime 
             body: new Uint8Array(await response.arrayBuffer())
         }}
 
-        console.log(serialized)
-        
         window.requestResult = serialized
     }}
 
