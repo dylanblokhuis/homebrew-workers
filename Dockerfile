@@ -20,4 +20,5 @@ RUN cargo build --release --bin homebrew-workers
 FROM debian:stable as runtime
 COPY --from=builder /app/target/release/homebrew-workers /usr/local/bin
 EXPOSE 3000
+EXPOSE 3001
 CMD [ "homebrew-workers" ]
