@@ -1,4 +1,4 @@
-use axum::{body::Body, http::Request};
+use axum::{body::Body, http::Request, response::Response};
 use deno_runtime::permissions::{Permissions, PermissionsOptions};
 use std::{
     path::PathBuf,
@@ -7,9 +7,9 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot};
 
-use crate::{runtime::Runtime, V8HandlerResponse};
+use crate::runtime::Runtime;
 
-pub type RuntimeChannelPayload = (Request<Body>, oneshot::Sender<V8HandlerResponse>);
+pub type RuntimeChannelPayload = (Request<Body>, oneshot::Sender<Response<Body>>);
 
 #[derive(Debug)]
 pub struct App {
@@ -58,8 +58,6 @@ impl App {
         script_path.push(self.script_file_name.clone());
 
         thread::spawn(move || {
-            let mut runtime = Runtime::new(script_path, permissions);
-
             tokio::runtime::Builder::new_multi_thread()
                 .thread_name("runtime-pool")
                 .worker_threads(2)
@@ -67,6 +65,7 @@ impl App {
                 .build()
                 .unwrap()
                 .block_on(async {
+                    let mut runtime = Runtime::new(script_path, permissions);
                     runtime.handle_request(&mut rx).await;
                 });
         });

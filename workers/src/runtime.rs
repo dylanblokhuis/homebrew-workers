@@ -41,6 +41,9 @@ impl Runtime {
         }
     }
 
+    /**
+     * Converts a http request into a Request object used inside the runtime
+     */
     async fn run(&mut self, request: Request<Body>) -> JsResponse {
         let js_runtime = &mut self.js_runtime;
 
@@ -51,9 +54,10 @@ impl Runtime {
 
             let url_key = v8::String::new(scope, "url").unwrap();
             let url = format!(
-                "http://{}{}",
+                "{}://{}{}",
+                request.uri().scheme_str().unwrap_or("http"),
                 request.headers().get(HOST).unwrap().to_str().unwrap(),
-                request.uri().path()
+                request.uri().path_and_query().unwrap()
             );
             let url_value = v8::String::new(scope, &url).unwrap();
 
@@ -72,6 +76,19 @@ impl Runtime {
                 header_object.set(scope, key.into(), value.into());
             }
             request_obj.set(scope, header_key.into(), header_object.into());
+
+            let body = request.into_body();
+            let bytes = hyper::body::to_bytes(body).await.unwrap();
+            let slice = bytes.to_vec().into_boxed_slice();
+            let len = slice.len();
+
+            let body_key = v8::String::new(scope, "body").unwrap();
+            let backing_store = v8::ArrayBuffer::new_backing_store_from_boxed_slice(slice);
+            let backing_store_shared = backing_store.make_shared();
+            let ab = v8::ArrayBuffer::with_backing_store(scope, &backing_store_shared);
+
+            let body_value = v8::Uint8Array::new(scope, ab, 0, len).unwrap();
+            request_obj.set(scope, body_key.into(), body_value.into());
 
             let event_request_key = v8::String::new(scope, "request").unwrap();
             event_obj.set(scope, event_request_key.into(), request_obj.into());
@@ -136,6 +153,10 @@ impl Runtime {
                     let body = String::from_utf8(js_response.body.to_vec()).unwrap_or_else(|_| "".into());
 
                     let mut response = Response::new(Body::try_from(body).unwrap());
+
+                    *response.status_mut() = StatusCode::from_u16(js_response.status)
+                        .expect("Status Code used that doesn't exist");
+
                     let headers = response.headers_mut();
                     for (key, value) in js_response.headers {
                         headers.insert(
@@ -144,7 +165,7 @@ impl Runtime {
                         );
                     }
 
-                    oneshot_tx.send((StatusCode::OK, response)).unwrap();
+                    oneshot_tx.send(response).unwrap();
                 }
                 _ = &mut sleep => {
                     println!("5 seconds passed without a request, so we're killing this runtime.");
@@ -304,6 +325,8 @@ fn init(script_path: PathBuf, permissions: Permissions) -> deno_core::JsRuntime 
             type: response.type,
             body: new Uint8Array(await response.arrayBuffer())
         }}
+
+        console.log(serialized)
         
         window.requestResult = serialized
     }}

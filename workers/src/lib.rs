@@ -3,7 +3,7 @@ use async_zip::read::mem::ZipFileReader;
 use axum::body::Body;
 use axum::extract::Extension;
 use axum::http::{Request, Response, StatusCode};
-use axum::{routing::get, Router};
+use axum::{routing::any, Router};
 use migration::sea_orm::{Database, DatabaseConnection, EntityTrait};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -16,7 +16,6 @@ use entity::user;
 mod app;
 mod runtime;
 
-pub type V8HandlerResponse = (StatusCode, Response<Body>);
 struct AppState {
     apps: Vec<App>,
 }
@@ -34,7 +33,7 @@ pub async fn run() {
     let app_state = Arc::new(AppState { apps });
 
     let worker_app = Router::new()
-        .route("/*key", get(handler))
+        .route("/*key", any(handler))
         .layer(Extension(app_state));
     let worker_addr = SocketAddr::from(([0, 0, 0, 0], 3000));
 
@@ -138,11 +137,8 @@ async fn setup(conn: DatabaseConnection) -> Vec<App> {
 }
 
 #[axum_macros::debug_handler]
-async fn handler(
-    Extension(state): Extension<Arc<AppState>>,
-    req: Request<Body>,
-) -> V8HandlerResponse {
-    let (tx, rx) = oneshot::channel::<V8HandlerResponse>();
+async fn handler(Extension(state): Extension<Arc<AppState>>, req: Request<Body>) -> Response<Body> {
+    let (tx, rx) = oneshot::channel::<Response<Body>>();
 
     let header = req.headers().get("x-app");
     if let Some(header_value) = header {
@@ -159,8 +155,9 @@ async fn handler(
             let runtime_channel = app.get_runtime().await;
             runtime_channel.send((req, tx)).await.unwrap();
         } else {
-            let request = Response::new(Body::empty());
-            tx.send((StatusCode::BAD_REQUEST, request)).unwrap();
+            let mut response = Response::new(Body::empty());
+            *response.status_mut() = StatusCode::BAD_REQUEST;
+            tx.send(response).unwrap();
         }
     }
 
