@@ -5,19 +5,17 @@ use axum::http::HeaderValue;
 use axum::http::Request;
 use axum::http::Response;
 use axum::http::StatusCode;
+use deno_broadcast_channel::InMemoryBroadcastChannel;
 use deno_core::error::AnyError;
 use deno_core::located_script_name;
-use deno_core::CompiledWasmModuleStore;
 use deno_core::Extension;
-use deno_core::GetErrorClassFn;
-use deno_core::JsErrorCreateFn;
+use deno_core::FsModuleLoader;
 use deno_core::JsRuntime;
 use deno_core::RuntimeOptions;
-use deno_core::SharedArrayBufferStore;
 use deno_runtime::deno_web::BlobStore;
-use deno_runtime::js;
 use deno_runtime::ops;
 use deno_runtime::permissions::Permissions;
+use deno_runtime::worker::WorkerOptions;
 use deno_runtime::BootstrapOptions;
 use serde::Deserialize;
 use serde::Serialize;
@@ -25,10 +23,12 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::app::RuntimeChannelPayload;
+use crate::snapshot;
 
 pub struct Runtime {
     js_runtime: JsRuntime,
@@ -177,19 +177,6 @@ impl Runtime {
     }
 }
 
-struct RunOptions {
-    pub bootstrap: BootstrapOptions,
-    pub extensions: Vec<Extension>,
-    pub unsafely_ignore_certificate_errors: Option<Vec<String>>,
-    pub user_agent: String,
-    pub seed: Option<u64>,
-    pub js_error_create_fn: Option<Rc<JsErrorCreateFn>>,
-    pub get_error_class_fn: Option<GetErrorClassFn>,
-    pub blob_store: BlobStore,
-    pub shared_array_buffer_store: Option<SharedArrayBufferStore>,
-    pub compiled_wasm_module_store: Option<CompiledWasmModuleStore>,
-}
-
 #[derive(Serialize, Deserialize, Clone)]
 pub struct JsResponse {
     pub headers: HashMap<String, String>,
@@ -206,11 +193,18 @@ fn get_error_class_name(e: &AnyError) -> &'static str {
 }
 
 fn init(script_path: PathBuf, permissions: Permissions) -> deno_core::JsRuntime {
-    let mut options = RunOptions {
+    let module_loader = Rc::new(FsModuleLoader);
+    let create_web_worker_cb = Arc::new(|_| {
+        panic!("Web workers are not supported");
+    });
+    let web_worker_preload_module_cb = Arc::new(|_| {
+        panic!("Web workers are not supported");
+    });
+    let mut options = WorkerOptions {
         bootstrap: BootstrapOptions {
             apply_source_maps: false,
             args: vec![],
-            cpu_count: std::thread::available_parallelism().unwrap().into(),
+            cpu_count: 1,
             debug_flag: false,
             enable_testing_features: false,
             location: None,
@@ -222,11 +216,19 @@ fn init(script_path: PathBuf, permissions: Permissions) -> deno_core::JsRuntime 
         },
         extensions: vec![],
         unsafely_ignore_certificate_errors: None,
+        root_cert_store: None,
         user_agent: "hello_runtime".to_string(),
-        seed: Some(32),
+        seed: None,
         js_error_create_fn: None,
+        web_worker_preload_module_cb,
+        create_web_worker_cb,
+        maybe_inspector_server: None,
+        should_break_on_first_statement: false,
+        module_loader,
         get_error_class_fn: Some(&get_error_class_name),
+        origin_storage_dir: None,
         blob_store: BlobStore::default(),
+        broadcast_channel: InMemoryBroadcastChannel::default(),
         shared_array_buffer_store: None,
         compiled_wasm_module_store: None,
     };
@@ -244,6 +246,7 @@ fn init(script_path: PathBuf, permissions: Permissions) -> deno_core::JsRuntime 
 
     // Internal modules
     let mut extensions: Vec<Extension> = vec![
+        kv::init(),
         // Web APIs
         deno_webidl::init(),
         deno_console::init(),
@@ -258,33 +261,30 @@ fn init(script_path: PathBuf, permissions: Permissions) -> deno_core::JsRuntime 
             file_fetch_handler: Rc::new(deno_fetch::FsFetchHandler),
             ..Default::default()
         }),
-        // deno_websocket::init::<Permissions>(
-        //     options.user_agent.clone(),
-        //     options.root_cert_store.clone(),
-        //     options.unsafely_ignore_certificate_errors.clone(),
-        // ),
-        // deno_webstorage::init(options.origin_storage_dir.clone()),
+        deno_websocket::init::<Permissions>(
+            options.user_agent.clone(),
+            options.root_cert_store.clone(),
+            options.unsafely_ignore_certificate_errors.clone(),
+        ),
+        deno_webstorage::init(options.origin_storage_dir.clone()),
         deno_crypto::init(options.seed),
-        // deno_broadcast_channel::init(options.broadcast_channel.clone(), unstable),
-        // deno_webgpu::init(unstable),
-        // ffi
-        // deno_ffi::init::<Permissions>(unstable),
-        // Runtime ops
-        // ops::runtime::init(main_module.clone()),
-        // ops::worker_host::init(
-        //     options.create_web_worker_cb.clone(),
-        //     options.web_worker_preload_module_cb.clone(),
-        // ),
+        deno_broadcast_channel::init(options.broadcast_channel.clone(), unstable),
+        deno_webgpu::init(unstable),
+        deno_ffi::init::<Permissions>(unstable),
+        ops::worker_host::init(
+            options.create_web_worker_cb.clone(),
+            options.web_worker_preload_module_cb.clone(),
+        ),
         ops::fs_events::init(),
         ops::fs::init(),
         ops::io::init(),
         ops::io::init_stdio(),
         deno_tls::init(),
-        // deno_net::init::<Permissions>(
-        //     options.root_cert_store.clone(),
-        //     unstable,
-        //     options.unsafely_ignore_certificate_errors.clone(),
-        // ),
+        deno_net::init::<Permissions>(
+            options.root_cert_store.clone(),
+            unstable,
+            options.unsafely_ignore_certificate_errors.clone(),
+        ),
         ops::os::init(None),
         ops::permissions::init(),
         ops::process::init(),
@@ -298,7 +298,8 @@ fn init(script_path: PathBuf, permissions: Permissions) -> deno_core::JsRuntime 
 
     let mut js_runtime = JsRuntime::new(RuntimeOptions {
         module_loader: None,
-        startup_snapshot: Some(js::deno_isolate_init()),
+        // startup_snapshot: None,
+        startup_snapshot: Some(snapshot::workers_isolate_init()),
         js_error_create_fn: options.js_error_create_fn.clone(),
         get_error_class_fn: options.get_error_class_fn,
         shared_array_buffer_store: options.shared_array_buffer_store.clone(),

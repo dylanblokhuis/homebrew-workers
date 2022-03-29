@@ -1145,7 +1145,7 @@ dependencies = [
  "hyper",
  "libc",
  "log",
- "lzzzz",
+ "lzzzz 0.8.0",
  "netif",
  "nix",
  "notify",
@@ -2202,6 +2202,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "kv"
+version = "0.1.0"
+dependencies = [
+ "deno_core",
+ "serde",
+ "tokio",
+]
+
+[[package]]
 name = "kv-log-macro"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2322,6 +2331,15 @@ name = "lzzzz"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6d891cedd3b1659c206a60ff8afd15bccd7c2754b157f8a164861989e042b88"
+dependencies = [
+ "cc",
+]
+
+[[package]]
+name = "lzzzz"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "736263997293f91cffd401b5370e2b06805c9796c0f31b9b478e9734cf4d72bc"
 dependencies = [
  "cc",
 ]
@@ -5061,19 +5079,29 @@ dependencies = [
  "async_zip",
  "axum",
  "axum-macros",
+ "deno_broadcast_channel",
  "deno_console",
  "deno_core",
  "deno_crypto",
  "deno_fetch",
+ "deno_ffi",
+ "deno_http",
+ "deno_net",
  "deno_runtime",
  "deno_tls",
  "deno_url",
  "deno_web",
+ "deno_webgpu",
  "deno_webidl",
+ "deno_websocket",
+ "deno_webstorage",
  "dotenv",
  "entity",
  "hyper",
+ "kv",
+ "lzzzz 1.0.3",
  "migration",
+ "once_cell",
  "rand",
  "rust-s3",
  "serde",

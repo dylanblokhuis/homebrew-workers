@@ -15,6 +15,7 @@ use entity::user;
 
 mod app;
 mod runtime;
+mod snapshot;
 
 struct AppState {
     apps: Vec<App>,
