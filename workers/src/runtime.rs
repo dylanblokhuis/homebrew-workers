@@ -49,7 +49,6 @@ impl Runtime {
 
         {
             let scope = &mut js_runtime.handle_scope();
-            let event_obj = v8::Object::new(scope);
             let request_obj = v8::Object::new(scope);
 
             let url_key = v8::String::new(scope, "url").unwrap();
@@ -90,21 +89,14 @@ impl Runtime {
             let body_value = v8::Uint8Array::new(scope, ab, 0, len).unwrap();
             request_obj.set(scope, body_key.into(), body_value.into());
 
-            let event_request_key = v8::String::new(scope, "request").unwrap();
-            event_obj.set(scope, event_request_key.into(), request_obj.into());
-            let event_respond_key = v8::String::new(scope, "respondWith").unwrap();
-
             let context = scope.get_current_context();
             let global = context.global(scope);
 
-            let respond_with_func = global.get(scope, event_respond_key.into()).unwrap();
-            event_obj.set(scope, event_respond_key.into(), respond_with_func);
-
-            let name = v8::String::new(scope, "onRequest").unwrap();
+            let name = v8::String::new(scope, "callOnRequest").unwrap();
             let func = global.get(scope, name.into()).unwrap();
 
             let cb = v8::Local::<v8::Function>::try_from(func).unwrap();
-            let args = &[event_obj.into()];
+            let args = &[request_obj.into()];
             cb.call(scope, global.into(), args).unwrap();
         }
 
@@ -291,6 +283,7 @@ fn init(script_path: PathBuf, permissions: Permissions) -> deno_core::JsRuntime 
         ops::signal::init(),
         ops::tty::init(),
         ops::http::init(),
+        utils::init(),
         // Permissions ext (worker specific state)
         perm_ext,
     ];
@@ -313,31 +306,13 @@ fn init(script_path: PathBuf, permissions: Permissions) -> deno_core::JsRuntime 
         .execute_script(&located_script_name!(), &script)
         .unwrap();
 
-    let worker_funcs_script = format!(
-        r#"
-    async function respondWith(response) {{
-        const serialized = {{
-            headers: Object.fromEntries(response.headers),
-            ok: response.ok,
-            redirected: response.redirected,
-            status: response.status,
-            statusText: response.statusText,
-            trailer: response.trailer,
-            type: response.type,
-            body: new Uint8Array(await response.arrayBuffer())
-        }}
-
-        window.requestResult = serialized
-    }}
-
-    window.respondWith = respondWith
-    window.cwd = "{}";
-    "#,
+    let set_cwd_script = format!(
+        r#"window.cwd = "{}";"#,
         script_path.parent().unwrap().to_str().unwrap()
     );
 
     js_runtime
-        .execute_script("worker_funcs", worker_funcs_script.as_str())
+        .execute_script("set_cwd_script", set_cwd_script.as_str())
         .unwrap();
 
     let js_code = std::fs::read_to_string(script_path.as_path()).unwrap();
