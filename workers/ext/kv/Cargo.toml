@@ -10,3 +10,7 @@ path = "lib.rs"
 deno_core = "0.126.0"
 tokio = { version = "1.17.0", features = ["full"] }
 serde = "1.0.136"
+chrono = "0.4.19"
+session = { path = "../../session" }
+entity = { path = "../../../entity" }
+migration = { path = "../../../migration" }

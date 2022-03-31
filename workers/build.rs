@@ -11,7 +11,7 @@ mod not_docs {
     use deno_core::Extension;
     use deno_core::JsRuntime;
     use deno_core::RuntimeOptions;
-    
+
     // TODO(bartlomieju): this module contains a lot of duplicated
     // logic with `cli/build.rs`, factor out to `deno_core`.
     fn create_snapshot(mut js_runtime: JsRuntime, snapshot_path: &Path, files: Vec<PathBuf>) {
@@ -117,7 +117,7 @@ mod not_docs {
 
     fn create_runtime_snapshot(snapshot_path: &Path, files: Vec<PathBuf>) {
         let extensions: Vec<Extension> = vec![
-            kv::init(),
+            kv::init(None),
             deno_webidl::init(),
             deno_console::init(),
             deno_url::init(),
@@ -138,7 +138,7 @@ mod not_docs {
                 None,
             ),
             deno_http::init(),
-            utils::init()
+            utils::init(),
         ];
 
         let js_runtime = JsRuntime::new(RuntimeOptions {

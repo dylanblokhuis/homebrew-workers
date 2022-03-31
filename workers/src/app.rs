@@ -1,5 +1,6 @@
 use axum::{body::Body, http::Request, response::Response};
 use deno_runtime::permissions::{Permissions, PermissionsOptions};
+use session::Session;
 use std::{
     path::PathBuf,
     sync::{Arc, RwLock},
@@ -13,6 +14,7 @@ pub type RuntimeChannelPayload = (Request<Body>, oneshot::Sender<Response<Body>>
 
 #[derive(Debug)]
 pub struct App {
+    pub session: Session,
     pub name: String,
     pub path: PathBuf,
     pub script_file_name: String,
@@ -20,8 +22,9 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(name: String, path: PathBuf, script_file_name: String) -> Self {
+    pub fn new(session: Session, name: String, path: PathBuf, script_file_name: String) -> Self {
         Self {
+            session,
             name,
             path,
             script_file_name,
@@ -57,15 +60,17 @@ impl App {
         let mut script_path = self.path.to_owned();
         script_path.push(self.script_file_name.clone());
 
+        let session = self.session.clone();
+
         thread::spawn(move || {
             tokio::runtime::Builder::new_multi_thread()
                 .thread_name("runtime-pool")
                 .worker_threads(2)
-                .enable_time()
+                .enable_all()
                 .build()
                 .unwrap()
                 .block_on(async {
-                    let mut runtime = Runtime::new(script_path, permissions);
+                    let mut runtime = Runtime::new(session, script_path, permissions);
                     runtime.handle_request(&mut rx).await;
                 });
         });

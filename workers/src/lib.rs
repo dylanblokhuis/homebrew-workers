@@ -5,6 +5,7 @@ use axum::extract::Extension;
 use axum::http::{Request, Response, StatusCode};
 use axum::{routing::any, Router};
 use migration::sea_orm::{Database, DatabaseConnection, EntityTrait};
+use session::Session;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -125,7 +126,13 @@ async fn setup(conn: DatabaseConnection) -> Vec<App> {
             reader.copy_to_end_crc(&mut output, 65536).await.unwrap();
         }
 
+        let session = Session {
+            user_id: user.id,
+            conn: conn.clone(),
+        };
+
         let app = App::new(
+            session,
             user.name.clone(),
             PathBuf::from_str(parent_dir.clone().as_str()).unwrap(),
             "main.js".into(),

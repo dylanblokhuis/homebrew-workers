@@ -19,6 +19,7 @@ use deno_runtime::worker::WorkerOptions;
 use deno_runtime::BootstrapOptions;
 use serde::Deserialize;
 use serde::Serialize;
+use session::Session;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -35,9 +36,9 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    pub fn new(script_path: PathBuf, permissions: Permissions) -> Self {
+    pub fn new(session: Session, script_path: PathBuf, permissions: Permissions) -> Self {
         Self {
-            js_runtime: init(script_path, permissions),
+            js_runtime: init(session, script_path, permissions),
         }
     }
 
@@ -184,7 +185,7 @@ fn get_error_class_name(e: &AnyError) -> &'static str {
     deno_runtime::errors::get_error_class_name(e).unwrap_or("Error")
 }
 
-fn init(script_path: PathBuf, permissions: Permissions) -> deno_core::JsRuntime {
+fn init(session: Session, script_path: PathBuf, permissions: Permissions) -> deno_core::JsRuntime {
     let module_loader = Rc::new(FsModuleLoader);
     let create_web_worker_cb = Arc::new(|_| {
         panic!("Web workers are not supported");
@@ -238,7 +239,7 @@ fn init(script_path: PathBuf, permissions: Permissions) -> deno_core::JsRuntime 
 
     // Internal modules
     let mut extensions: Vec<Extension> = vec![
-        kv::init(),
+        kv::init(Some(session)),
         // Web APIs
         deno_webidl::init(),
         deno_console::init(),

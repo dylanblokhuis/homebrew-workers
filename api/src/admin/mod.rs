@@ -1,6 +1,7 @@
 use axum::extract::Path;
 use axum::response::IntoResponse;
 use axum::{body, extract::Extension, routing::get, Json, Router};
+use entity::namespace;
 use entity::user;
 use migration::sea_orm::ActiveValue::Set;
 use migration::sea_orm::{DatabaseConnection, EntityTrait, ModelTrait};
@@ -62,11 +63,22 @@ async fn create_user(
         created_at: Set(chrono::DateTime::into(chrono::Utc::now())),
         ..Default::default()
     };
-
     let insert_res = user::Entity::insert(to_be_inserted)
         .exec(conn)
         .await
-        .map_err(|_| ApiError::empty(500))?;
+        .map_err(ApiError::db)?;
+
+    // Create a namespace for the user
+    let to_be_inserted = namespace::ActiveModel {
+        name: Set("default".into()),
+        user_id: Set(insert_res.last_insert_id),
+        created_at: Set(chrono::DateTime::into(chrono::Utc::now())),
+        ..Default::default()
+    };
+    namespace::Entity::insert(to_be_inserted)
+        .exec(conn)
+        .await
+        .map_err(ApiError::db)?;
 
     Ok(Json(format!("Created user: {}", insert_res.last_insert_id)))
 }

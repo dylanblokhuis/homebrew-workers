@@ -2205,8 +2205,12 @@ dependencies = [
 name = "kv"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "deno_core",
+ "entity",
+ "migration",
  "serde",
+ "session",
  "tokio",
 ]
 
@@ -3754,6 +3758,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "session"
+version = "0.1.0"
+dependencies = [
+ "migration",
+ "serde",
+]
+
+[[package]]
 name = "sha-1"
 version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5113,6 +5125,7 @@ dependencies = [
  "rand",
  "rust-s3",
  "serde",
+ "session",
  "tokio",
  "utils",
  "v8",

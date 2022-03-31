@@ -20,9 +20,10 @@ deno_webgpu = "0.45.0"
 deno_ffi = "0.31.0"
 deno_net = "0.36.0"
 deno_http = "0.38.0"
-kv = { path = "./ext/kv" }
-utils = { path = "./ext/utils" }
 lzzzz = "1.0.3"
+kv = { path = "./ext/kv"}
+utils = { path = "./ext/utils"}
+session = { path = "./session"}
 
 [dependencies]
 axum = "0.4.8"
@@ -43,8 +44,6 @@ deno_webgpu = "0.45.0"
 deno_ffi = "0.31.0"
 deno_net = "0.36.0"
 deno_http = "0.38.0"
-kv = { path = "./ext/kv" }
-utils = { path = "./ext/utils" }
 dotenv = "0.15.0"
 rand = "0.8.5"
 serde = "1.0.136"
@@ -57,3 +56,6 @@ migration = { path = "../migration" }
 hyper = "0.14.18"
 lzzzz = "1.0.3"
 once_cell = "1.10.0"
+kv = { path = "./ext/kv"}
+utils = { path = "./ext/utils"}
+session = { path = "./session"}

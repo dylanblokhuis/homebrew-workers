@@ -16,7 +16,7 @@
   /**
    * @param {string} name 
    * 
-   * @returns {Promise<string>}
+   * @returns {Promise<string | null>}
    */
   function get(name) {
     return core.opAsync("op_kv_get", name);
