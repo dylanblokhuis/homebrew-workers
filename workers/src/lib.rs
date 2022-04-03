@@ -4,13 +4,15 @@ use axum::body::Body;
 use axum::extract::Extension;
 use axum::http::{Request, Response, StatusCode};
 use axum::{routing::any, Router};
-use migration::sea_orm::{Database, DatabaseConnection, EntityTrait};
+use migration::sea_orm::{Database, EntityTrait};
 use session::Session;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::oneshot::{self};
+use tokio::sync::RwLock;
 
 use entity::user;
 
@@ -19,20 +21,24 @@ mod runtime;
 mod snapshot;
 
 struct AppState {
-    apps: Vec<App>,
+    apps: Arc<RwLock<Vec<App>>>,
 }
 
 pub async fn run() {
-    let conn = Database::connect(
-        std::env::var("DATABASE_URL")
-            .expect("No DATABASE_URL environment variable found.")
-            .as_str(),
-    )
-    .await
-    .expect("Database connection failed");
+    let apps = Arc::new(RwLock::new(setup().await));
+    let app_state = Arc::new(AppState { apps: apps.clone() });
 
-    let apps = setup(conn).await;
-    let app_state = Arc::new(AppState { apps });
+    let apps2 = apps.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+
+        loop {
+            interval.tick().await;
+
+            let new_apps = setup().await;
+            *apps2.write().await = new_apps;
+        }
+    });
 
     let worker_app = Router::new()
         .route("/*key", any(handler))
@@ -102,7 +108,15 @@ fn init_bucket() -> s3::Bucket {
     bucket
 }
 
-async fn setup(conn: DatabaseConnection) -> Vec<App> {
+async fn setup() -> Vec<App> {
+    let conn = Database::connect(
+        std::env::var("DATABASE_URL")
+            .expect("No DATABASE_URL environment variable found.")
+            .as_str(),
+    )
+    .await
+    .expect("Database connection failed");
+
     let bucket = init_bucket();
     let users = user::Entity::find()
         .all(&conn)
@@ -170,15 +184,16 @@ async fn handler(Extension(state): Extension<Arc<AppState>>, req: Request<Body>)
 
     let header = req.headers().get("x-app");
     if let Some(header_value) = header {
-        let app = state
-            .apps
+        let guard = state.apps.read().await;
+        let app = guard
             .iter()
             .find(|it| it.name == header_value.to_str().unwrap())
             .unwrap();
         let runtime_channel = app.get_runtime().await;
         runtime_channel.send((req, tx)).await.unwrap();
     } else {
-        let app = state.apps.get(0);
+        let guard = state.apps.read().await;
+        let app = guard.get(0);
         if let Some(app) = app {
             let runtime_channel = app.get_runtime().await;
             runtime_channel.send((req, tx)).await.unwrap();
