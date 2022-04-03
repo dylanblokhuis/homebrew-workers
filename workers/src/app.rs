@@ -12,7 +12,7 @@ use crate::runtime::Runtime;
 
 pub type RuntimeChannelPayload = (Request<Body>, oneshot::Sender<Response<Body>>);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct App {
     pub session: Session,
     pub name: String,

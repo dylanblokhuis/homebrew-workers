@@ -16,7 +16,7 @@ use tokio::sync::RwLock;
 
 use entity::user;
 
-mod app;
+pub mod app;
 mod runtime;
 mod snapshot;
 
@@ -24,21 +24,28 @@ struct AppState {
     apps: Arc<RwLock<Vec<App>>>,
 }
 
-pub async fn run() {
-    let apps = Arc::new(RwLock::new(setup().await));
+pub async fn run(maybe_default_app: Option<Arc<App>>) {
+    let apps: Arc<RwLock<Vec<App>>>;
+    if let Some(default_app) = maybe_default_app {
+        let app = Arc::try_unwrap(default_app).unwrap();
+
+        apps = Arc::new(RwLock::new(vec![app]));
+    } else {
+        apps = Arc::new(RwLock::new(setup().await));
+
+        let apps2 = apps.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(60));
+
+            loop {
+                interval.tick().await;
+                let new_apps = setup().await;
+                *apps2.write().await = new_apps;
+            }
+        });
+    }
+
     let app_state = Arc::new(AppState { apps: apps.clone() });
-
-    let apps2 = apps.clone();
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(60));
-
-        loop {
-            interval.tick().await;
-
-            let new_apps = setup().await;
-            *apps2.write().await = new_apps;
-        }
-    });
 
     let worker_app = Router::new()
         .route("/*key", any(handler))

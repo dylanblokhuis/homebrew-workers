@@ -13,11 +13,11 @@ async fn main() {
         )
         .await
         .expect("Database connection failed");
-    
+
         Migrator::up(&conn, None).await.unwrap();
     }
-    
-    let worker_server = tokio::spawn(async move { workers::run().await });
+
+    let worker_server = tokio::spawn(async move { workers::run(None).await });
     let api_server = tokio::spawn(async move { api::run().await });
 
     let (_, _) = tokio::join!(worker_server, api_server);

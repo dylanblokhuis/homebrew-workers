@@ -1,0 +1,16 @@
+[package]
+name = "hbw"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+workers = { path = "../workers" }
+session = { path = "../workers/session"}
+migration = { path = "../migration" }
+entity = { path = "../entity" }
+tokio = { version = "1.17.0", features = ["full"] }
+clap = { version = "3.1.8", features = ["derive"] }
+rand = "0.8.5"
+chrono = "0.4.19"
