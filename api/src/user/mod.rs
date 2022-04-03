@@ -51,12 +51,16 @@ async fn deploy(
     let hash = digest_bytes(&bytes.to_vec());
 
     let file_name = format!("/{}/{}.zip", user.0.id, hash);
-    let (_, code) = bucket
+    let (res, code) = bucket
         .put_object_with_content_type(&file_name, &bytes.to_vec(), "application/zip")
         .await
-        .map_err(|_| ApiError::new(500, "Failed to send request to S3 storage"))?;
+        .map_err(|err| {
+            println!("{:?}", err);
+            ApiError::new(500, "Failed to send request to S3 storage")
+        })?;
 
     if code != 200 {
+        println!("res: {:?} code: {:?}", res, code);
         return Err(ApiError::new(500, "Failed to put object into S3 storage."));
     }
 
