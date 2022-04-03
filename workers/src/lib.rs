@@ -65,9 +65,29 @@ fn init_bucket() -> s3::Bucket {
     )
     .unwrap();
 
+    let maybe_endpoint = std::env::var("S3_ENDPOINT");
+
+    if maybe_endpoint.is_err() {
+        let bucket = s3::Bucket::new(
+            std::env::var("S3_BUCKET")
+                .expect("S3_BUCKET not found")
+                .as_str(),
+            s3::Region::from_str(
+                std::env::var("S3_REGION")
+                    .expect("S3_REGION not found")
+                    .as_str(),
+            )
+            .expect("Unknown region"),
+            credentials,
+        )
+        .unwrap();
+
+        return bucket;
+    }
+
     let region = s3::Region::Custom {
         region: std::env::var("S3_REGION").expect("S3_REGION not found"),
-        endpoint: std::env::var("S3_ENDPOINT").expect("S3_ENDPOINT not found"),
+        endpoint: maybe_endpoint.unwrap(),
     };
 
     let bucket = s3::Bucket::new_with_path_style(
