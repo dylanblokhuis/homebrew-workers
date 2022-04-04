@@ -20,16 +20,15 @@ pub mod app;
 mod runtime;
 mod snapshot;
 
+#[derive(Clone)]
 struct AppState {
     apps: Arc<RwLock<Vec<App>>>,
 }
 
-pub async fn run(maybe_default_app: Option<Arc<App>>) {
+pub async fn run(maybe_default_app: Option<App>) {
     let apps: Arc<RwLock<Vec<App>>>;
     if let Some(default_app) = maybe_default_app {
-        let app = Arc::try_unwrap(default_app).unwrap();
-
-        apps = Arc::new(RwLock::new(vec![app]));
+        apps = Arc::new(RwLock::new(vec![default_app]));
     } else {
         apps = Arc::new(RwLock::new(setup().await));
 
@@ -40,12 +39,12 @@ pub async fn run(maybe_default_app: Option<Arc<App>>) {
             loop {
                 interval.tick().await;
                 let new_apps = setup().await;
-                *apps2.write().await = new_apps;
+                *apps2.clone().write().await = new_apps;
             }
         });
     }
 
-    let app_state = Arc::new(AppState { apps: apps.clone() });
+    let app_state = AppState { apps: apps };
 
     let worker_app = Router::new()
         .route("/*key", any(handler))

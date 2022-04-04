@@ -5,7 +5,7 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [workspace]
-members = [".", "entity", "migration", "api", "workers", "workers/session", "workers/ext/kv", "workers/ext/utils", "cli"]
+members = [".", "cli", "entity", "migration", "api", "workers", "workers/session", "workers/ext/kv", "workers/ext/utils"]
 
 [dependencies]
 tokio = { version = "1.17.0", features = ["full"] }

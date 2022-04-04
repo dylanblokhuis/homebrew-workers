@@ -7,7 +7,7 @@ use migration::sea_orm::{DatabaseConnection, EntityTrait};
 use migration::{sea_orm::Database, Migrator, MigratorTrait};
 use rand::{distributions::Alphanumeric, Rng};
 use session::Session;
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 use workers::app::App;
 
 static USER_NAME: &str = "cli-user";
@@ -83,5 +83,5 @@ pub async fn start(path_buf: PathBuf) {
 
     let app = App::new(session, "default".into(), path_buf, "main.js".into());
 
-    workers::run(Some(Arc::new(app))).await;
+    workers::run(Some(app)).await;
 }
