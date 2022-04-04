@@ -40,8 +40,7 @@ async fn main() {
                 let (watcher_tx, watcher_rx) = std::sync::mpsc::channel();
                 let (server_tx, mut server_rx) = tokio::sync::mpsc::channel::<()>(1);
 
-                // not sure what this delay does
-                let mut watcher = watcher(watcher_tx, Duration::from_millis(100)).unwrap();
+                let mut watcher = watcher(watcher_tx, Duration::from_millis(400)).unwrap();
                 watcher
                     .watch(path.clone(), RecursiveMode::Recursive)
                     .unwrap();

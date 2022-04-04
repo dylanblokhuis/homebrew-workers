@@ -5323,6 +5323,7 @@ dependencies = [
 name = "workers"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async_zip",
  "axum",
  "axum-macros",

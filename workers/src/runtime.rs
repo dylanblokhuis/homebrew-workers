@@ -1,3 +1,4 @@
+use anyhow::Result;
 use axum::body::Body;
 use axum::http::header::HeaderName;
 use axum::http::header::HOST;
@@ -45,7 +46,7 @@ impl Runtime {
     /**
      * Converts a http request into a Request object used inside the runtime
      */
-    async fn run(&mut self, request: Request<Body>) -> JsResponse {
+    async fn run(&mut self, request: Request<Body>) -> Result<JsResponse> {
         let js_runtime = &mut self.js_runtime;
 
         {
@@ -78,7 +79,7 @@ impl Runtime {
             request_obj.set(scope, header_key.into(), header_object.into());
 
             let body = request.into_body();
-            let bytes = hyper::body::to_bytes(body).await.unwrap();
+            let bytes = hyper::body::to_bytes(body).await?;
             let slice = bytes.to_vec().into_boxed_slice();
             let len = slice.len();
 
@@ -96,13 +97,13 @@ impl Runtime {
             let name = v8::String::new(scope, "callOnRequest").unwrap();
             let func = global.get(scope, name.into()).unwrap();
 
-            let cb = v8::Local::<v8::Function>::try_from(func).unwrap();
+            let cb = v8::Local::<v8::Function>::try_from(func)?;
             let args = &[request_obj.into()];
             cb.call(scope, global.into(), args).unwrap();
         }
 
         {
-            js_runtime.run_event_loop(false).await.unwrap();
+            js_runtime.run_event_loop(false).await?;
         }
 
         let js_response = {
@@ -113,21 +114,11 @@ impl Runtime {
             let response = global.get(scope, name.into()).unwrap();
             global.delete(scope, name.into()).unwrap();
 
-            // let body_key = v8::String::new(scope, "body").unwrap();
-            // let body = response
-            //     .to_object(scope)
-            //     .unwrap()
-            //     .get(scope, body_key.into())
-            //     .unwrap();
-            // let uint8array = v8::Local::<v8::Uint8Array>::try_from(body).unwrap();
-            // println!("{:?}", uint8array.copy_contents(dest));
-
-            let js_response: JsResponse = deno_core::serde_v8::from_v8(scope, response).unwrap();
-
+            let js_response: JsResponse = deno_core::serde_v8::from_v8(scope, response)?;
             js_response
         };
 
-        js_response
+        Ok(js_response)
     }
 
     pub fn terminate(&mut self) {
@@ -142,9 +133,18 @@ impl Runtime {
 
             tokio::select! {
                 Some((request, oneshot_tx)) = rx.recv() => {
-                    let js_response = self.run(request).await;
-                    let body = String::from_utf8(js_response.body.to_vec()).unwrap_or_else(|_| "".into());
+                    let js_response = match self.run(request).await {
+                        Ok(js_response) => js_response,
+                        Err(e) => {
+                            println!("Error from runtime {:?}", e);
+                            let mut response = Response::new(Body::empty());
+                            *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                            oneshot_tx.send(response).unwrap();
+                            continue;
+                        }
+                    };
 
+                    let body = String::from_utf8(js_response.body.to_vec()).unwrap_or_else(|_| "".into());
                     let mut response = Response::new(Body::try_from(body).unwrap());
 
                     *response.status_mut() = StatusCode::from_u16(js_response.status)
