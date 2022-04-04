@@ -1,12 +1,15 @@
+use std::collections::HashMap;
 use std::{cell::RefCell, rc::Rc};
 
-use deno_core::{error::AnyError, include_js_files, op, Extension, OpState};
+use deno_core::anyhow::Context;
+use deno_core::{anyhow::Result, include_js_files, op, Extension, OpState};
 use entity::namespace;
 use entity::store;
 use migration::sea_orm::ActiveValue::Set;
 use migration::sea_orm::ColumnTrait;
 use migration::sea_orm::EntityTrait;
 use migration::sea_orm::QueryFilter;
+use migration::DbErr;
 use session::Session;
 
 pub fn init(maybe_session: Option<Session>) -> Extension {
@@ -15,7 +18,13 @@ pub fn init(maybe_session: Option<Session>) -> Extension {
             prefix "ext/kv",
             "01_kv.js",
         ))
-        .ops(vec![op_kv_set::decl(), op_kv_get::decl()])
+        .ops(vec![
+            op_kv_set::decl(),
+            op_kv_get::decl(),
+            op_kv_delete::decl(),
+            op_kv_clear::decl(),
+            op_kv_all::decl(),
+        ])
         .state(move |state| {
             if let Some(session) = maybe_session.clone() {
                 state.put::<Session>(session);
@@ -26,24 +35,13 @@ pub fn init(maybe_session: Option<Session>) -> Extension {
 }
 
 #[op]
-async fn op_kv_set(
-    state: Rc<RefCell<OpState>>,
-    key: String,
-    value: String,
-) -> Result<(), AnyError> {
-    let namespace_name = "default";
+async fn op_kv_set(state: Rc<RefCell<OpState>>, key: String, value: String) -> Result<()> {
     let session = {
         let state = state.borrow();
         state.borrow::<Session>().clone()
     };
 
-    let namespace = namespace::Entity::find()
-        .filter(namespace::Column::Name.eq(namespace_name))
-        .filter(namespace::Column::UserId.eq(session.user_id))
-        .one(&session.conn)
-        .await?
-        .expect("This user has no default namespace, something is going wrong here..");
-
+    let namespace = get_namespace(&session).await?;
     let maybe_item = store::Entity::find()
         .filter(store::Column::Key.eq(key.clone()))
         .filter(store::Column::NamespaceId.eq(namespace.id))
@@ -77,20 +75,13 @@ async fn op_kv_set(
 }
 
 #[op]
-async fn op_kv_get(state: Rc<RefCell<OpState>>, key: String) -> Result<Option<String>, AnyError> {
-    let namespace_name = "default";
+async fn op_kv_get(state: Rc<RefCell<OpState>>, key: String) -> Result<Option<String>> {
     let session = {
         let state = state.borrow();
         state.borrow::<Session>().clone()
     };
 
-    let namespace = namespace::Entity::find()
-        .filter(namespace::Column::Name.eq(namespace_name))
-        .filter(namespace::Column::UserId.eq(session.user_id))
-        .one(&session.conn)
-        .await?
-        .expect("This user has no default namespace, something is going wrong here..");
-
+    let namespace = get_namespace(&session).await?;
     let store_item = store::Entity::find()
         .filter(store::Column::Key.eq(key))
         .filter(store::Column::NamespaceId.eq(namespace.id))
@@ -102,4 +93,82 @@ async fn op_kv_get(state: Rc<RefCell<OpState>>, key: String) -> Result<Option<St
     }
 
     Ok(None)
+}
+
+#[op]
+async fn op_kv_delete(state: Rc<RefCell<OpState>>, key: String) -> Result<()> {
+    let session = {
+        let state = state.borrow();
+        state.borrow::<Session>().clone()
+    };
+
+    let namespace = get_namespace(&session).await?;
+
+    let maybe_item = store::Entity::find()
+        .filter(store::Column::Key.eq(key))
+        .filter(store::Column::NamespaceId.eq(namespace.id))
+        .one(&session.conn)
+        .await?;
+
+    if let Some(item) = maybe_item {
+        let to_delete = store::ActiveModel {
+            id: Set(item.id),
+            ..Default::default()
+        };
+
+        store::Entity::delete(to_delete).exec(&session.conn).await?;
+    }
+
+    Ok(())
+}
+
+#[op]
+async fn op_kv_clear(state: Rc<RefCell<OpState>>) -> Result<()> {
+    let session = {
+        let state = state.borrow();
+        state.borrow::<Session>().clone()
+    };
+
+    let namespace = get_namespace(&session).await?;
+    store::Entity::delete_many()
+        .filter(store::Column::NamespaceId.eq(namespace.id))
+        .exec(&session.conn)
+        .await?;
+
+    Ok(())
+}
+
+#[op]
+async fn op_kv_all(state: Rc<RefCell<OpState>>) -> Result<HashMap<String, String>> {
+    let session = {
+        let state = state.borrow();
+        state.borrow::<Session>().clone()
+    };
+
+    let namespace = get_namespace(&session).await?;
+    let items = store::Entity::find()
+        .filter(store::Column::NamespaceId.eq(namespace.id))
+        .all(&session.conn)
+        .await
+        .context("Failed to get store items from database")?;
+
+    let mut map: HashMap<String, String> = HashMap::new();
+    for item in items {
+        map.insert(item.key, item.value);
+    }
+
+    Ok(map)
+}
+
+async fn get_namespace(session: &Session) -> Result<namespace::Model, DbErr> {
+    let name = "default";
+
+    let namespace = namespace::Entity::find()
+        .filter(namespace::Column::Name.eq(name))
+        .filter(namespace::Column::UserId.eq(session.user_id))
+        .one(&session.conn)
+        .await?
+        .expect("This user has no default namespace, something is going wrong here..");
+
+    Ok(namespace)
 }

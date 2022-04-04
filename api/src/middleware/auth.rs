@@ -43,8 +43,8 @@ pub async fn authorize_route(
     }
 
     let maybe_user = user::Entity::find()
-        .filter(user::Column::ClientId.starts_with(payload.client_id.as_str()))
-        .filter(user::Column::ClientSecret.starts_with(payload.client_secret.as_str()))
+        .filter(user::Column::ClientId.eq(payload.client_id.as_str()))
+        .filter(user::Column::ClientSecret.eq(payload.client_secret.as_str()))
         .one(conn)
         .await
         .unwrap();
