@@ -48,7 +48,7 @@ pub async fn run(maybe_default_app: Option<App>) {
 
     let worker_app = Router::new()
         .route("/*key", any(handler))
-        .layer(Extension(app_state));
+        .layer(Extension(Arc::new(app_state)));
     let worker_addr = SocketAddr::from(([0, 0, 0, 0], 3000));
 
     println!("Workers listening on {}", worker_addr);
