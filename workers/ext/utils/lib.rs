@@ -8,14 +8,3 @@ pub fn init() -> Extension {
         ))
         .build()
 }
-
-// #[op]
-// async fn op_kv_set(
-//     state: Rc<RefCell<OpState>>,
-//     name: String,
-//     value: String,
-// ) -> Result<(), AnyError> {
-//     println!("received op! {} {}", name, value);
-
-//     Ok(())
-// }

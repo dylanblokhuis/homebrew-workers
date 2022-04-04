@@ -38,4 +38,7 @@
   }
 
   window.callOnRequest = callOnRequest
+  window._hbw = {
+    cwd: undefined
+  }
 })(this);

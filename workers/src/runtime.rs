@@ -308,7 +308,9 @@ fn init(session: Session, script_path: PathBuf, permissions: Permissions) -> den
         .unwrap();
 
     let set_cwd_script = format!(
-        r#"window.cwd = "{}";"#,
+        r#"
+        window._hbw.cwd = "{}";
+        "#,
         script_path.parent().unwrap().to_str().unwrap()
     );
 

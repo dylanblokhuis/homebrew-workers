@@ -14,3 +14,4 @@ tokio = { version = "1.17.0", features = ["full"] }
 clap = { version = "3.1.8", features = ["derive"] }
 rand = "0.8.5"
 chrono = "0.4.19"
+notify = "4.0.17"
