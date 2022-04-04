@@ -12,7 +12,7 @@ mod run;
 
 fn cli() -> Command<'static> {
     Command::new("hbw")
-        .about("Run stuff locally")
+        .about("Run homebrew-workers locally")
         .subcommand_required(true)
         .arg_required_else_help(true)
         .allow_external_subcommands(true)
