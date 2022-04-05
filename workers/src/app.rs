@@ -18,16 +18,24 @@ pub struct App {
     pub name: String,
     pub path: PathBuf,
     pub script_file_name: String,
+    pub deployment: String,
     runtime: Arc<RwLock<Option<mpsc::Sender<RuntimeChannelPayload>>>>,
 }
 
 impl App {
-    pub fn new(session: Session, name: String, path: PathBuf, script_file_name: String) -> Self {
+    pub fn new(
+        session: Session,
+        name: String,
+        path: PathBuf,
+        script_file_name: String,
+        deployment: String,
+    ) -> Self {
         Self {
             session,
             name,
             path,
             script_file_name,
+            deployment,
             runtime: Arc::new(RwLock::new(None)),
         }
     }

@@ -21,7 +21,7 @@ async fn query_default_user(conn: &DatabaseConnection) -> Option<user::Model> {
 }
 
 async fn get_or_create_default_user(conn: &DatabaseConnection) -> user::Model {
-    if let Some(default_user) = query_default_user(&conn).await {
+    if let Some(default_user) = query_default_user(conn).await {
         return default_user;
     }
 
@@ -61,7 +61,7 @@ async fn get_or_create_default_user(conn: &DatabaseConnection) -> user::Model {
         .await
         .unwrap();
 
-    return query_default_user(&conn).await.unwrap();
+    return query_default_user(conn).await.unwrap();
 }
 
 pub async fn start(path_buf: PathBuf) {
@@ -81,7 +81,13 @@ pub async fn start(path_buf: PathBuf) {
         conn,
     };
 
-    let app = App::new(session, "default".into(), path_buf, "main.js".into());
+    let app = App::new(
+        session,
+        "default".into(),
+        path_buf,
+        "main.js".into(),
+        "cli-deployment".into(),
+    );
 
     workers::run(Some(app)).await;
 }

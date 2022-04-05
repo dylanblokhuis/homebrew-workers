@@ -47,7 +47,7 @@ async fn main() {
 
                 tokio::spawn(async move {
                     let mut current_handle: Option<JoinHandle<()>> = None;
-                    while let Some(_) = server_rx.recv().await {
+                    while (server_rx.recv().await).is_some() {
                         // stop server from previous loop
                         if let Some(handle) = current_handle {
                             println!("Restarting server...");

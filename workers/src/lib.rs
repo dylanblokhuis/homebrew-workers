@@ -30,21 +30,24 @@ pub async fn run(maybe_default_app: Option<App>) {
     if let Some(default_app) = maybe_default_app {
         apps = Arc::new(RwLock::new(vec![default_app]));
     } else {
-        apps = Arc::new(RwLock::new(setup().await));
+        apps = Arc::new(RwLock::new(setup(&[]).await));
 
         let apps2 = apps.clone();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(60));
+            let mut interval = tokio::time::interval(Duration::from_secs(5));
 
             loop {
                 interval.tick().await;
-                let new_apps = setup().await;
-                *apps2.clone().write().await = new_apps;
+                let new_apps = {
+                    let existing_apps = apps2.read().await;
+                    setup(&existing_apps).await
+                };
+                *apps2.write().await = new_apps;
             }
         });
     }
 
-    let app_state = AppState { apps: apps };
+    let app_state = AppState { apps };
 
     let worker_app = Router::new()
         .route("/*key", any(handler))
@@ -114,7 +117,7 @@ fn init_bucket() -> s3::Bucket {
     bucket
 }
 
-async fn setup() -> Vec<App> {
+async fn setup(existing_apps: &[App]) -> Vec<App> {
     let conn = Database::connect(
         std::env::var("DATABASE_URL")
             .expect("No DATABASE_URL environment variable found.")
@@ -129,23 +132,30 @@ async fn setup() -> Vec<App> {
         .await
         .expect("Failed to setup the initial users");
 
-    let mut apps = vec![];
+    let mut apps: Vec<App> = vec![];
     for user in users.iter() {
-        let path = user.latest_deployment.as_ref();
-        if path.is_none() {
+        let deployment_path = match &user.latest_deployment {
+            Some(deployment_path) => deployment_path,
+            None => continue,
+        };
+
+        let maybe_app_has_no_new = existing_apps
+            .iter()
+            .find(|app| &app.deployment == deployment_path && app.name == user.name);
+
+        if let Some(app) = maybe_app_has_no_new {
+            apps.push(app.clone());
             continue;
         }
 
-        let (bytes, code) = bucket.get_object(path.unwrap()).await.unwrap();
+        let (bytes, code) = bucket.get_object(&deployment_path).await.unwrap();
         if code != 200 {
             panic!("Couldn't get item from bucket");
         }
 
         let parent_dir = format!("/tmp/homebrew-workers/{}", user.id);
-        tokio::fs::remove_dir_all(parent_dir.clone())
-            .await
-            .unwrap_or(());
-        tokio::fs::create_dir_all(parent_dir.clone()).await.unwrap();
+        tokio::fs::remove_dir_all(&parent_dir).await.unwrap_or(());
+        tokio::fs::create_dir_all(&parent_dir).await.unwrap();
 
         let zip = ZipFileReader::new(&bytes).await.unwrap();
         let mut zip_2 = ZipFileReader::new(&bytes).await.unwrap();
@@ -156,7 +166,7 @@ async fn setup() -> Vec<App> {
             }
 
             let reader = zip_2.entry_reader(index).await.unwrap();
-            let path_str = format!("{}/{}", parent_dir.clone(), entry.name());
+            let path_str = format!("{}/{}", &parent_dir, entry.name());
             let path = Path::new(&path_str);
             tokio::fs::create_dir_all(path.parent().unwrap())
                 .await
@@ -176,11 +186,15 @@ async fn setup() -> Vec<App> {
             user.name.clone(),
             PathBuf::from_str(parent_dir.clone().as_str()).unwrap(),
             "main.js".into(),
+            deployment_path.into(),
         );
 
+        println!("New deployment found: {}", deployment_path);
         apps.push(app);
     }
 
+    // temporary so the order of keys doesnt get messed up
+    apps.sort_by(|a, b| a.deployment.cmp(&b.deployment));
     apps
 }
 

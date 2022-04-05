@@ -26,14 +26,14 @@ services:
     restart: always
     ports:
       - 8080:8080
-  # s3:
-  #   image: minio/minio
-  #   command: [ "server", "/data", "--console-address=:9001" ]
-  #   volumes:
-  #     - minio:/data
-  #   ports:
-  #     - 9000:9000
-  #     - 9001:9001
+  s3:
+    image: minio/minio
+    command: [ "server", "/data", "--console-address=:9001" ]
+    volumes:
+      - minio:/data
+    ports:
+      - 9000:9000
+      - 9001:9001
 
 volumes:
   pgdata:
