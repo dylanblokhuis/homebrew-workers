@@ -61,7 +61,7 @@ async fn create_user(
         client_id: Set(client_id),
         client_secret: Set(client_secret),
         created_at: Set(chrono::DateTime::into(chrono::Utc::now())),
-        ..Default::default()
+        ..entity::user::ActiveModel::default()
     };
     let insert_res = user::Entity::insert(to_be_inserted)
         .exec(conn)
@@ -73,7 +73,7 @@ async fn create_user(
         name: Set("default".into()),
         user_id: Set(insert_res.last_insert_id),
         created_at: Set(chrono::DateTime::into(chrono::Utc::now())),
-        ..Default::default()
+        ..entity::namespace::ActiveModel::default()
     };
     namespace::Entity::insert(to_be_inserted)
         .exec(conn)

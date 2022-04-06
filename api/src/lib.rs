@@ -1,3 +1,9 @@
+#![deny(clippy::all)]
+#![warn(clippy::pedantic)]
+#![warn(clippy::nursery)]
+#![allow(clippy::future_not_send)]
+#![allow(clippy::diverging_sub_expression)]
+use anyhow::{Context, Result};
 use axum::extract::Extension;
 use axum::http::header;
 use axum::routing::post;
@@ -16,14 +22,17 @@ mod errors;
 mod middleware;
 mod user;
 
-pub async fn run() {
+/// # Errors
+///
+/// Will return `Err` if webserver panics
+pub async fn run() -> Result<()> {
     let conn = Database::connect(
         std::env::var("DATABASE_URL")
             .expect("No DATABASE_URL environment variable found.")
             .as_str(),
     )
     .await
-    .expect("Database connection failed");
+    .context("Database connection failed")?;
 
     let bucket = init_bucket();
 
@@ -45,8 +54,9 @@ pub async fn run() {
     println!("Api listening on {}", addr);
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
-        .await
-        .unwrap();
+        .await?;
+
+    Ok(())
 }
 
 fn init_bucket() -> s3::Bucket {

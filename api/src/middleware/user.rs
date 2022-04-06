@@ -20,7 +20,7 @@ impl<B> FromRequest<B> for User
 where
     B: Send,
 {
-    type Rejection = UserError;
+    type Rejection = Error;
 
     async fn from_request(req: &mut RequestParts<B>) -> Result<Self, Self::Rejection> {
         // extract the id from the path
@@ -32,7 +32,7 @@ where
         // now we deserialize the token and check if the user has perms
         let bearer = TypedHeader::<Authorization<Bearer>>::from_request(req).await;
         if bearer.is_err() {
-            return Err(UserError::Unauthorized);
+            return Err(Error::Unauthorized);
         }
         let token_data = decode::<Claims>(
             bearer.unwrap().token(),
@@ -40,12 +40,12 @@ where
             &Validation::default(),
         );
         if token_data.is_err() {
-            return Err(UserError::Unauthorized);
+            return Err(Error::Unauthorized);
         }
 
         let claims = token_data.unwrap().claims;
         if id != claims.sub && !claims.is_admin {
-            return Err(UserError::Unauthorized);
+            return Err(Error::Unauthorized);
         }
 
         let conn = req
@@ -56,18 +56,18 @@ where
         let user = user::Entity::find_by_id(id).one(conn).await.unwrap();
 
         if user.is_none() {
-            return Err(UserError::NotFound);
+            return Err(Error::NotFound);
         }
 
-        Ok(User(user.unwrap()))
+        Ok(Self(user.unwrap()))
     }
 }
 
-impl IntoResponse for UserError {
+impl IntoResponse for Error {
     fn into_response(self) -> Response {
         let (status, error_message) = match self {
-            UserError::NotFound => (StatusCode::NOT_FOUND, "This user doesn't exist"),
-            UserError::Unauthorized => (
+            Error::NotFound => (StatusCode::NOT_FOUND, "This user doesn't exist"),
+            Error::Unauthorized => (
                 StatusCode::UNAUTHORIZED,
                 "Not authorized to access this user",
             ),
@@ -78,7 +78,7 @@ impl IntoResponse for UserError {
 }
 
 #[derive(Debug)]
-pub enum UserError {
+pub enum Error {
     NotFound,
     Unauthorized,
 }

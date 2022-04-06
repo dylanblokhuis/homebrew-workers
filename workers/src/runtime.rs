@@ -22,7 +22,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use session::Session;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::Path;
 use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -37,7 +37,7 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    pub fn new(session: Session, script_path: PathBuf, permissions: Permissions) -> Self {
+    pub fn new(session: Session, script_path: &Path, permissions: Permissions) -> Self {
         Self {
             js_runtime: init(session, script_path, permissions),
         }
@@ -185,7 +185,7 @@ fn get_error_class_name(e: &AnyError) -> &'static str {
     deno_runtime::errors::get_error_class_name(e).unwrap_or("Error")
 }
 
-fn init(session: Session, script_path: PathBuf, permissions: Permissions) -> deno_core::JsRuntime {
+fn get_options() -> WorkerOptions {
     let module_loader = Rc::new(FsModuleLoader);
     let create_web_worker_cb = Arc::new(|_| {
         panic!("Web workers are not supported");
@@ -193,7 +193,7 @@ fn init(session: Session, script_path: PathBuf, permissions: Permissions) -> den
     let web_worker_preload_module_cb = Arc::new(|_| {
         panic!("Web workers are not supported");
     });
-    let mut options = WorkerOptions {
+    WorkerOptions {
         bootstrap: BootstrapOptions {
             apply_source_maps: false,
             args: vec![],
@@ -224,8 +224,11 @@ fn init(session: Session, script_path: PathBuf, permissions: Permissions) -> den
         broadcast_channel: InMemoryBroadcastChannel::default(),
         shared_array_buffer_store: None,
         compiled_wasm_module_store: None,
-    };
+    }
+}
 
+fn init(session: Session, script_path: &Path, permissions: Permissions) -> deno_core::JsRuntime {
+    let mut options = get_options();
     let unstable = options.bootstrap.unstable;
     let enable_testing_features = options.bootstrap.enable_testing_features;
     let perm_ext = Extension::builder()
@@ -252,7 +255,7 @@ fn init(session: Session, script_path: PathBuf, permissions: Permissions) -> den
             user_agent: options.user_agent.clone(),
             unsafely_ignore_certificate_errors: options.unsafely_ignore_certificate_errors.clone(),
             file_fetch_handler: Rc::new(deno_fetch::FsFetchHandler),
-            ..Default::default()
+            ..deno_fetch::Options::default()
         }),
         deno_websocket::init::<Permissions>(
             options.user_agent.clone(),
@@ -299,7 +302,7 @@ fn init(session: Session, script_path: PathBuf, permissions: Permissions) -> den
         shared_array_buffer_store: options.shared_array_buffer_store.clone(),
         compiled_wasm_module_store: options.compiled_wasm_module_store.clone(),
         extensions,
-        ..Default::default()
+        ..deno_core::RuntimeOptions::default()
     });
 
     let script = format!("bootstrap.mainRuntime({})", options.bootstrap.as_json());
@@ -318,7 +321,7 @@ fn init(session: Session, script_path: PathBuf, permissions: Permissions) -> den
         .execute_script("set_cwd_script", set_cwd_script.as_str())
         .unwrap();
 
-    let js_code = std::fs::read_to_string(script_path.as_path()).unwrap();
+    let js_code = std::fs::read_to_string(script_path).unwrap();
     js_runtime
         .execute_script(script_path.to_str().unwrap(), &js_code)
         .unwrap();

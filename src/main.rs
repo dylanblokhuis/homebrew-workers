@@ -1,3 +1,8 @@
+#![deny(clippy::all)]
+#![warn(clippy::pedantic)]
+#![warn(clippy::nursery)]
+#![allow(clippy::future_not_send)]
+
 use dotenv::dotenv;
 use migration::{sea_orm::Database, Migrator, MigratorTrait};
 

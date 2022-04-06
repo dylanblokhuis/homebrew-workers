@@ -89,5 +89,5 @@ pub async fn start(path_buf: PathBuf) {
         "cli-deployment".into(),
     );
 
-    workers::run(Some(app)).await;
+    workers::run(Some(app)).await.unwrap();
 }

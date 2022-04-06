@@ -1,3 +1,8 @@
+#![deny(clippy::all)]
+#![warn(clippy::pedantic)]
+#![warn(clippy::nursery)]
+#![allow(clippy::future_not_send)]
+#![allow(clippy::diverging_sub_expression)]
 use app::App;
 use async_zip::read::mem::ZipFileReader;
 use axum::body::Body;
@@ -25,7 +30,10 @@ struct AppState {
     apps: Arc<RwLock<Vec<App>>>,
 }
 
-pub async fn run(maybe_default_app: Option<App>) {
+/// # Errors
+///
+/// Will return `Err` if webserver panics
+pub async fn run(maybe_default_app: Option<App>) -> anyhow::Result<()> {
     let apps: Arc<RwLock<Vec<App>>>;
     if let Some(default_app) = maybe_default_app {
         apps = Arc::new(RwLock::new(vec![default_app]));
@@ -58,8 +66,9 @@ pub async fn run(maybe_default_app: Option<App>) {
 
     axum::Server::bind(&worker_addr)
         .serve(worker_app.into_make_service())
-        .await
-        .unwrap();
+        .await?;
+
+    Ok(())
 }
 
 fn init_bucket() -> s3::Bucket {
@@ -133,7 +142,7 @@ async fn setup(existing_apps: &[App]) -> Vec<App> {
         .expect("Failed to setup the initial users");
 
     let mut apps: Vec<App> = vec![];
-    for user in users.iter() {
+    for user in &users {
         let deployment_path = match &user.latest_deployment {
             Some(deployment_path) => deployment_path,
             None => continue,
@@ -149,9 +158,7 @@ async fn setup(existing_apps: &[App]) -> Vec<App> {
         }
 
         let (bytes, code) = bucket.get_object(&deployment_path).await.unwrap();
-        if code != 200 {
-            panic!("Couldn't get item from bucket");
-        }
+        assert!(code == 200, "Couldn't get item from bucket");
 
         let parent_dir = format!("/tmp/homebrew-workers/{}", user.id);
         tokio::fs::remove_dir_all(&parent_dir).await.unwrap_or(());
@@ -198,7 +205,6 @@ async fn setup(existing_apps: &[App]) -> Vec<App> {
     apps
 }
 
-#[axum_macros::debug_handler]
 async fn handler(Extension(state): Extension<Arc<AppState>>, req: Request<Body>) -> Response<Body> {
     let (tx, rx) = oneshot::channel::<Response<Body>>();
 

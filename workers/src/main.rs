@@ -17,5 +17,5 @@ async fn main() {
         Migrator::up(&conn, None).await.unwrap();
     }
 
-    workers::run(None).await;
+    workers::run(None).await.unwrap();
 }

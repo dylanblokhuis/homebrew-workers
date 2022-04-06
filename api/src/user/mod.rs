@@ -67,7 +67,7 @@ async fn deploy(
     let model = user::ActiveModel {
         id: Set(user.0.id),
         latest_deployment: Set(Some(file_name.clone())),
-        ..Default::default()
+        ..entity::user::ActiveModel::default()
     };
 
     user::Entity::update(model)

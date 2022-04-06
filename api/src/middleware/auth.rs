@@ -4,7 +4,7 @@ use axum::{
     headers::{authorization::Bearer, Authorization},
     http::{Request, StatusCode},
     middleware::Next,
-    response::{IntoResponse, Response},
+    response::IntoResponse,
     Json,
 };
 use entity::user;
@@ -12,7 +12,8 @@ use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation}
 use migration::sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+
+use crate::errors::ApiError;
 
 pub static KEYS: Lazy<Keys> = Lazy::new(|| {
     let secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
@@ -21,25 +22,25 @@ pub static KEYS: Lazy<Keys> = Lazy::new(|| {
 
 // should be post
 pub async fn authorize_route(
-    Json(payload): Json<AuthPayload>,
+    Json(payload): Json<Payload>,
     Extension(ref conn): Extension<DatabaseConnection>,
-) -> Result<Json<AuthBody>, AuthError> {
+) -> Result<Json<Body>, ApiError> {
     if payload.client_id.is_empty() || payload.client_secret.is_empty() {
-        return Err(AuthError::MissingCredentials);
+        return Err(ApiError::new(400, "Missing credentials"));
     }
 
     let admin_client_id = std::env::var("ADMIN_CLIENT_ID").expect("ADMIN_CLIENT_ID must be set");
     let admin_client_secret =
         std::env::var("ADMIN_CLIENT_SECRET").expect("ADMIN_CLIENT_SECRET must be set");
 
-    let mut claims: Option<Claims> = None;
-
-    if payload.client_id == admin_client_id || payload.client_secret == admin_client_secret {
-        claims = Some(Claims {
+    if payload.client_id == admin_client_id && payload.client_secret == admin_client_secret {
+        let token = encode_token(&Claims {
             sub: 0,
             is_admin: true,
-            exp: 2000000000,
-        });
+            exp: 2_000_000_000,
+        })?;
+
+        return Ok(Json(Body::new(token)));
     }
 
     let maybe_user = user::Entity::find()
@@ -47,26 +48,26 @@ pub async fn authorize_route(
         .filter(user::Column::ClientSecret.eq(payload.client_secret.as_str()))
         .one(conn)
         .await
-        .unwrap();
+        .map_err(ApiError::db)?;
 
     if let Some(user) = maybe_user {
-        claims = Some(Claims {
+        let token = encode_token(&Claims {
             sub: user.id,
             is_admin: false,
-            exp: 2000000000,
-        });
+            exp: 2_000_000_000,
+        })?;
+
+        return Ok(Json(Body::new(token)));
     }
 
-    if claims.is_none() {
-        return Err(AuthError::WrongCredentials);
-    }
+    Err(ApiError::new(401, "Wrong credentials"))
+}
 
-    // Create the authorization token
-    let token = encode(&Header::default(), &claims.unwrap(), &KEYS.encoding)
-        .map_err(|_| AuthError::TokenCreation)?;
+fn encode_token(claims: &Claims) -> Result<String, ApiError> {
+    let result = encode(&Header::default(), &claims, &KEYS.encoding)
+        .map_err(|_| ApiError::new(500, "Failed to create token"))?;
 
-    // Send the authorized token
-    Ok(Json(AuthBody::new(token)))
+    Ok(result)
 }
 
 pub async fn is_admin_middleware(
@@ -97,7 +98,7 @@ pub async fn is_admin_middleware(
     Ok(next.run(request).await)
 }
 
-impl AuthBody {
+impl Body {
     fn new(access_token: String) -> Self {
         Self {
             access_token,
@@ -105,21 +106,6 @@ impl AuthBody {
         }
     }
 }
-
-impl IntoResponse for AuthError {
-    fn into_response(self) -> Response {
-        let (status, error_message) = match self {
-            AuthError::WrongCredentials => (StatusCode::UNAUTHORIZED, "Wrong credentials"),
-            AuthError::MissingCredentials => (StatusCode::BAD_REQUEST, "Missing credentials"),
-            AuthError::TokenCreation => (StatusCode::INTERNAL_SERVER_ERROR, "Token creation error"),
-        };
-        let body = Json(json!({
-            "error": error_message,
-        }));
-        (status, body).into_response()
-    }
-}
-
 pub struct Keys {
     pub encoding: EncodingKey,
     pub decoding: DecodingKey,
@@ -142,20 +128,13 @@ pub struct Claims {
 }
 
 #[derive(Debug, Serialize)]
-pub struct AuthBody {
+pub struct Body {
     access_token: String,
     token_type: String,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct AuthPayload {
+pub struct Payload {
     client_id: String,
     client_secret: String,
-}
-
-#[derive(Debug)]
-pub enum AuthError {
-    WrongCredentials,
-    MissingCredentials,
-    TokenCreation,
 }

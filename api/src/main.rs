@@ -13,9 +13,9 @@ async fn main() {
         )
         .await
         .expect("Database connection failed");
-    
+
         Migrator::up(&conn, None).await.unwrap();
     }
-    
-    api::run().await;
+
+    api::run().await.unwrap();
 }
